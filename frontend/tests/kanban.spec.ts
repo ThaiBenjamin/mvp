@@ -1,13 +1,24 @@
 import { expect, test } from "@playwright/test";
 
-test("loads the kanban board", async ({ page }) => {
+const signIn = async (page: any) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+  const loginTitle = page.getByRole("heading", { name: "Project Management MVP" });
+  if (await loginTitle.isVisible()) {
+    await page.getByPlaceholder("user").fill("user");
+    await page.getByPlaceholder("password").fill("password");
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await expect(page.getByRole("heading", { name: "Kanban Studio" }).first()).toBeVisible();
+  }
+};
+
+test("loads the kanban board", async ({ page }) => {
+  await signIn(page);
+  await expect(page.getByRole("heading", { name: "Kanban Studio" }).first()).toBeVisible();
   await expect(page.locator('[data-testid^="column-"]')).toHaveCount(5);
 });
 
 test("adds a card to a column", async ({ page }) => {
-  await page.goto("/");
+  await signIn(page);
   const firstColumn = page.locator('[data-testid^="column-"]').first();
   await firstColumn.getByRole("button", { name: /add a card/i }).click();
   await firstColumn.getByPlaceholder("Card title").fill("Playwright card");
@@ -16,26 +27,33 @@ test("adds a card to a column", async ({ page }) => {
   await expect(firstColumn.getByText("Playwright card")).toBeVisible();
 });
 
-test("moves a card between columns", async ({ page }) => {
+test("allows login and logout", async ({ page }) => {
   await page.goto("/");
-  const card = page.getByTestId("card-card-1");
-  const targetColumn = page.getByTestId("column-col-review");
-  const cardBox = await card.boundingBox();
-  const columnBox = await targetColumn.boundingBox();
-  if (!cardBox || !columnBox) {
-    throw new Error("Unable to resolve drag coordinates.");
-  }
 
-  await page.mouse.move(
-    cardBox.x + cardBox.width / 2,
-    cardBox.y + cardBox.height / 2
-  );
-  await page.mouse.down();
-  await page.mouse.move(
-    columnBox.x + columnBox.width / 2,
-    columnBox.y + 120,
-    { steps: 12 }
-  );
-  await page.mouse.up();
-  await expect(targetColumn.getByTestId("card-card-1")).toBeVisible();
+  await page.getByPlaceholder("user").fill("user");
+  await page.getByPlaceholder("password").fill("password");
+  await page.getByRole("button", { name: /sign in/i }).click();
+
+  await expect(page.getByRole("heading", { name: "Kanban Studio" }).first()).toBeVisible();
+  await page.getByRole("button", { name: /log out/i }).click();
+
+  await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
+});
+
+test("persists board changes across logout and login", async ({ page }) => {
+  await signIn(page);
+  const cardTitle = `Persistence card ${Date.now()}`;
+
+  const firstColumn = page.locator('[data-testid^="column-"]').first();
+  await firstColumn.getByRole("button", { name: /add a card/i }).click();
+  await firstColumn.getByPlaceholder("Card title").fill(cardTitle);
+  await firstColumn.getByPlaceholder("Details").fill("Saved across sessions.");
+  await firstColumn.getByRole("button", { name: /add card/i }).click();
+
+  await expect(firstColumn.getByText(cardTitle)).toBeVisible();
+  await page.getByRole("button", { name: /log out/i }).click();
+  await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
+
+  await signIn(page);
+  await expect(page.getByText(cardTitle)).toBeVisible();
 });

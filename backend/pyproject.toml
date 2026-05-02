@@ -1,0 +1,13 @@
+[project]
+name = "pm-backend"
+version = "0.1.0"
+description = "Project Management MVP backend"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.111.2",
+  "uvicorn[standard]>=0.24.0",
+  "python-dotenv>=1.0.0"
+]
+
+[tool.uv]
+project = "pyproject.toml"
