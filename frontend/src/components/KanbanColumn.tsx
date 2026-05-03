@@ -20,15 +20,15 @@ export const KanbanColumn = ({
   onAddCard,
   onDeleteCard,
 }: KanbanColumnProps) => {
-  const { setNodeRef, isOver } = useDroppable({ id: column.id });
+  const { setNodeRef, isOver } = useDroppable({
+    id: column.id,
+    data: { columnId: column.id },
+  });
 
   return (
     <section
       ref={setNodeRef}
-      className={clsx(
-        "flex min-h-[520px] flex-col rounded-3xl border border-[var(--stroke)] bg-[var(--surface-strong)] p-4 shadow-[var(--shadow)] transition",
-        isOver && "ring-2 ring-[var(--accent-yellow)]"
-      )}
+      className="flex min-h-[520px] flex-col rounded-3xl border border-[var(--stroke)] bg-[var(--surface-strong)] p-4 shadow-[var(--shadow)] transition"
       data-testid={`column-${column.id}`}
     >
       <div className="flex items-start justify-between gap-3">
@@ -47,7 +47,12 @@ export const KanbanColumn = ({
           />
         </div>
       </div>
-      <div className="mt-4 flex flex-1 flex-col gap-3">
+      <div
+        className={clsx(
+          "mt-4 flex flex-1 flex-col gap-3",
+          isOver && "ring-2 ring-[var(--accent-yellow)]"
+        )}
+      >
         <SortableContext items={column.cardIds} strategy={verticalListSortingStrategy}>
           {cards.map((card) => (
             <KanbanCard

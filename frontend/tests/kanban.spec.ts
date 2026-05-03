@@ -57,3 +57,21 @@ test("persists board changes across logout and login", async ({ page }) => {
   await signIn(page);
   await expect(page.getByText(cardTitle)).toBeVisible();
 });
+
+test("moves a card into an empty column", async ({ page }) => {
+  await signIn(page);
+
+  // Move the only card from Discovery into Backlog to create an empty column.
+  await page
+    .getByTestId("card-card-3")
+    .dragTo(page.getByTestId("column-col-backlog"));
+
+  await expect(page.getByTestId("column-col-discovery").getByText("Drop a card here")).toBeVisible();
+
+  // Drag another card into the newly emptied Discovery column.
+  await page
+    .getByTestId("card-card-1")
+    .dragTo(page.getByTestId("column-col-discovery"));
+
+  await expect(page.getByTestId("column-col-discovery").getByText("Align roadmap themes")).toBeVisible();
+});

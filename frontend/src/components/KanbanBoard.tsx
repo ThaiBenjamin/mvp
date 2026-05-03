@@ -15,10 +15,54 @@ import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
 
+const findColumnId = (columns: BoardData["columns"], id: string) => {
+  if (columns.some((column) => column.id === id)) {
+    return id;
+  }
+
+  return columns.find((column) => column.cardIds.includes(id))?.id ?? null;
+};
+
+export const resolveDragOverColumnId = (
+  over: { id: string; data?: { current?: { columnId?: string } } } | null
+) => {
+  return (
+    over?.data?.current?.columnId ||
+    (over?.id as string | undefined)
+  );
+};
+
+export const getTargetDetails = (
+  columns: BoardData["columns"],
+  overId: string
+): { columnId: string; index: number } | null => {
+  const columnId = findColumnId(columns, overId);
+  if (!columnId) {
+    return null;
+  }
+
+  const targetColumn = columns.find((column) => column.id === columnId);
+  if (!targetColumn) {
+    return null;
+  }
+
+  const overIsColumn = targetColumn.id === overId;
+  if (overIsColumn) {
+    return { columnId, index: targetColumn.cardIds.length };
+  }
+
+  const targetIndex = targetColumn.cardIds.indexOf(overId);
+  return {
+    columnId,
+    index: targetIndex === -1 ? targetColumn.cardIds.length : targetIndex,
+  };
+};
+
 export const KanbanBoard = () => {
   const [board, setBoard] = useState<BoardData>(() => initialData);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [loadingBoard, setLoadingBoard] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -26,14 +70,14 @@ export const KanbanBoard = () => {
       try {
         const response = await fetch("/api/board");
         if (!response.ok) {
-          setLoadingBoard(false);
+          setLoadError("Unable to load board from server. Using local board state.");
           return;
         }
 
         const data = (await response.json()) as BoardData;
         setBoard(data);
       } catch {
-        // Keep the initial data if loading fails.
+        setLoadError("Unable to load board from server. Using local board state.");
       } finally {
         setLoadingBoard(false);
       }
@@ -42,16 +86,27 @@ export const KanbanBoard = () => {
     loadBoard();
   }, []);
 
-  const persistBoard = async (nextBoard: BoardData) => {
-    setBoard(nextBoard);
+  const sendBoardAction = async (
+    action: string,
+    payload: Record<string, unknown>,
+    optimisticBoard: BoardData
+  ) => {
+    setBoard(optimisticBoard);
     setSaveError(null);
 
     try {
-      await fetch("/api/board", {
+      const response = await fetch("/api/board/actions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(nextBoard),
+        body: JSON.stringify({ action, payload }),
       });
+
+      if (!response.ok) {
+        throw new Error("Save failed");
+      }
+
+      const updatedBoard = (await response.json()) as BoardData;
+      setBoard(updatedBoard);
     } catch {
       setSaveError("Unable to save board changes. Refresh to retry.");
     }
@@ -77,24 +132,46 @@ export const KanbanBoard = () => {
       return;
     }
 
-    persistBoard({
-      ...board,
-      columns: moveCard(board.columns, active.id as string, over.id as string),
-    });
+    const overColumnId = resolveDragOverColumnId(over);
+
+    const nextColumns = moveCard(
+      board.columns,
+      active.id as string,
+      overColumnId
+    );
+    const targetDetails = getTargetDetails(board.columns, overColumnId);
+    const nextBoard = { ...board, columns: nextColumns };
+
+    if (!targetDetails) {
+      setBoard(nextBoard);
+      return;
+    }
+
+    sendBoardAction(
+      "move_card",
+      {
+        card_id: active.id as string,
+        target_column_id: targetDetails.columnId,
+        target_index: targetDetails.index,
+      },
+      nextBoard
+    );
   };
 
   const handleRenameColumn = (columnId: string, title: string) => {
-    persistBoard({
+    const nextBoard = {
       ...board,
       columns: board.columns.map((column) =>
         column.id === columnId ? { ...column, title } : column
       ),
-    });
+    };
+
+    sendBoardAction("rename_column", { column_id: columnId, title }, nextBoard);
   };
 
   const handleAddCard = (columnId: string, title: string, details: string) => {
     const id = createId("card");
-    persistBoard({
+    const nextBoard = {
       ...board,
       cards: {
         ...board.cards,
@@ -105,24 +182,38 @@ export const KanbanBoard = () => {
           ? { ...column, cardIds: [...column.cardIds, id] }
           : column
       ),
-    });
+    };
+
+    sendBoardAction(
+      "add_card",
+      {
+        column_id: columnId,
+        title,
+        details: details || "No details yet.",
+        card_id: id,
+      },
+      nextBoard
+    );
   };
 
   const handleDeleteCard = (columnId: string, cardId: string) => {
-    persistBoard({
+    const nextBoard = {
       ...board,
       cards: Object.fromEntries(
         Object.entries(board.cards).filter(([id]) => id !== cardId)
       ),
       columns: board.columns.map((column) =>
         column.id === columnId
-          ? {
-              ...column,
-              cardIds: column.cardIds.filter((id) => id !== cardId),
-            }
+          ? { ...column, cardIds: column.cardIds.filter((id) => id !== cardId) }
           : column
       ),
-    });
+    };
+
+    sendBoardAction(
+      "delete_card",
+      { column_id: columnId, card_id: cardId },
+      nextBoard
+    );
   };
 
   const activeCard = activeCardId ? cardsById[activeCardId] : null;
@@ -177,6 +268,20 @@ export const KanbanBoard = () => {
               </div>
             ))}
           </div>
+          {(loadError || saveError) && (
+            <div className="grid gap-3">
+              {loadError && (
+                <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {loadError}
+                </div>
+              )}
+              {saveError && (
+                <div className="rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-700">
+                  {saveError}
+                </div>
+              )}
+            </div>
+          )}
         </header>
 
         <DndContext
