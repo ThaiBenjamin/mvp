@@ -10,6 +10,7 @@ import {
   closestCorners,
   type DragEndEvent,
   type DragStartEvent,
+  type UniqueIdentifier,
 } from "@dnd-kit/core";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
@@ -24,12 +25,13 @@ const findColumnId = (columns: BoardData["columns"], id: string) => {
 };
 
 export const resolveDragOverColumnId = (
-  over: { id: string; data?: { current?: { columnId?: string } } } | null
-) => {
-  return (
-    over?.data?.current?.columnId ||
-    (over?.id as string | undefined)
-  );
+  over: { id: UniqueIdentifier; data?: { current?: { columnId?: string } } } | null
+): string | null => {
+  if (!over) {
+    return null;
+  }
+
+  return over.data?.current?.columnId ?? String(over.id);
 };
 
 export const getTargetDetails = (
@@ -133,6 +135,9 @@ export const KanbanBoard = () => {
     }
 
     const overColumnId = resolveDragOverColumnId(over);
+    if (!overColumnId) {
+      return;
+    }
 
     const nextColumns = moveCard(
       board.columns,
