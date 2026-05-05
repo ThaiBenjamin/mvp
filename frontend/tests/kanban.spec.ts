@@ -1,13 +1,43 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
+
+// dnd-kit's PointerSensor has a 6px activation distance and updates `over`
+// only on pointermove. Playwright's `Locator.dragTo` performs a single-step
+// mouse.move which does not give dnd-kit enough events to track the pointer
+// across multiple droppables. This helper performs an explicit multi-step
+// drag that mimics a real user.
+const dragCardTo = async (page: Page, source: Locator, target: Locator) => {
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  if (!sourceBox || !targetBox) {
+    throw new Error("Drag source or target has no bounding box");
+  }
+  const sx = sourceBox.x + sourceBox.width / 2;
+  const sy = sourceBox.y + sourceBox.height / 2;
+  const tx = targetBox.x + targetBox.width / 2;
+  const ty = targetBox.y + targetBox.height / 2;
+
+  await page.mouse.move(sx, sy);
+  await page.mouse.down();
+  // Nudge past the activation distance, then traverse to the target.
+  await page.mouse.move(sx + 8, sy + 8, { steps: 1 });
+  await page.mouse.move(tx, ty, { steps: 8 });
+  await page.waitForTimeout(50);
+  await page.mouse.up();
+};
 
 const signIn = async (page: any) => {
   await page.goto("/");
   const loginTitle = page.getByRole("heading", { name: "Project Management MVP" });
+  const boardTitle = page.getByRole("heading", { name: "Kanban Studio" }).first();
+
+  // Wait for the auth state to settle: either the login form or the board appears.
+  await expect(loginTitle.or(boardTitle)).toBeVisible();
+
   if (await loginTitle.isVisible()) {
     await page.getByPlaceholder("user").fill("user");
     await page.getByPlaceholder("password").fill("password");
     await page.getByRole("button", { name: /sign in/i }).click();
-    await expect(page.getByRole("heading", { name: "Kanban Studio" }).first()).toBeVisible();
+    await expect(boardTitle).toBeVisible();
   }
 };
 
@@ -62,16 +92,24 @@ test("moves a card into an empty column", async ({ page }) => {
   await signIn(page);
 
   // Move the only card from Discovery into Backlog to create an empty column.
-  await page
-    .getByTestId("card-card-3")
-    .dragTo(page.getByTestId("column-col-backlog"));
+  await dragCardTo(
+    page,
+    page.getByTestId("card-card-3"),
+    page.getByTestId("column-col-backlog")
+  );
 
-  await expect(page.getByTestId("column-col-discovery").getByText("Drop a card here")).toBeVisible();
+  await expect(
+    page.getByTestId("column-col-discovery").getByText("Drop a card here")
+  ).toBeVisible();
 
   // Drag another card into the newly emptied Discovery column.
-  await page
-    .getByTestId("card-card-1")
-    .dragTo(page.getByTestId("column-col-discovery"));
+  await dragCardTo(
+    page,
+    page.getByTestId("card-card-1"),
+    page.getByTestId("column-col-discovery")
+  );
 
-  await expect(page.getByTestId("column-col-discovery").getByText("Align roadmap themes")).toBeVisible();
+  await expect(
+    page.getByTestId("column-col-discovery").getByText("Align roadmap themes")
+  ).toBeVisible();
 });

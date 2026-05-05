@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -8,12 +8,18 @@ import {
   useSensor,
   useSensors,
   closestCorners,
+  getFirstCollision,
+  pointerWithin,
+  rectIntersection,
+  type CollisionDetection,
   type DragEndEvent,
+  type DragOverEvent,
   type DragStartEvent,
   type UniqueIdentifier,
 } from "@dnd-kit/core";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
+import { AiChat } from "@/components/AiChat";
 import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
 
 const findColumnId = (columns: BoardData["columns"], id: string) => {
@@ -32,6 +38,56 @@ export const resolveDragOverColumnId = (
   }
 
   return over.data?.current?.columnId ?? String(over.id);
+};
+
+const isColumnId = (columns: BoardData["columns"], id: UniqueIdentifier) =>
+  columns.some((column) => column.id === id);
+
+// Multi-container kanban collision detection (adapted from the dnd-kit
+// MultipleContainers example). Pointer-first so empty columns win when the
+// cursor is over them, then drill down to the nearest card inside the column
+// so within-column reordering still works.
+export const buildCollisionDetection = (
+  columns: BoardData["columns"],
+  lastOverIdRef: { current: UniqueIdentifier | null }
+): CollisionDetection => (args) => {
+  const filtered = {
+    ...args,
+    droppableContainers: args.droppableContainers.filter(
+      (container) => container.id !== args.active?.id
+    ),
+  };
+
+  const pointerCollisions = pointerWithin(filtered);
+  const intersections =
+    pointerCollisions.length > 0 ? pointerCollisions : rectIntersection(filtered);
+  let overId = getFirstCollision(intersections, "id");
+
+  if (overId == null) {
+    overId = getFirstCollision(closestCorners(filtered), "id") ?? null;
+  }
+
+  if (overId != null && isColumnId(columns, overId)) {
+    const column = columns.find((c) => c.id === overId);
+    if (column && column.cardIds.length > 0) {
+      const cardSet = new Set<UniqueIdentifier>(column.cardIds);
+      const inner = closestCorners({
+        ...filtered,
+        droppableContainers: filtered.droppableContainers.filter(
+          (container) => container.id !== overId && cardSet.has(container.id)
+        ),
+      });
+      const innerId = getFirstCollision(inner, "id");
+      if (innerId != null) overId = innerId;
+    }
+  }
+
+  if (overId == null) {
+    return lastOverIdRef.current ? [{ id: lastOverIdRef.current }] : [];
+  }
+
+  lastOverIdRef.current = overId;
+  return [{ id: overId }];
 };
 
 export const getTargetDetails = (
@@ -66,6 +122,10 @@ export const KanbanBoard = () => {
   const [loadingBoard, setLoadingBoard] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const dragSourceColumnRef = useRef<string | null>(null);
+  const lastOverIdRef = useRef<UniqueIdentifier | null>(null);
+  const boardRef = useRef<BoardData>(board);
+  boardRef.current = board;
 
   useEffect(() => {
     const loadBoard = async () => {
@@ -122,44 +182,105 @@ export const KanbanBoard = () => {
 
   const cardsById = useMemo(() => board.cards, [board.cards]);
 
+  const collisionDetection = useMemo(
+    () => buildCollisionDetection(board.columns, lastOverIdRef),
+    [board.columns]
+  );
+
   const handleDragStart = (event: DragStartEvent) => {
-    setActiveCardId(event.active.id as string);
+    const activeId = event.active.id as string;
+    setActiveCardId(activeId);
+    dragSourceColumnRef.current = findColumnId(board.columns, activeId);
+    lastOverIdRef.current = null;
+  };
+
+  const handleDragOver = (event: DragOverEvent) => {
+    const { active, over } = event;
+    if (!over) return;
+
+    const activeId = active.id as string;
+    const overId = String(over.id);
+    if (activeId === overId) return;
+
+    setBoard((prev) => {
+      const activeColumn = findColumnId(prev.columns, activeId);
+      const overColumn = findColumnId(prev.columns, overId);
+      if (!activeColumn || !overColumn || activeColumn === overColumn) return prev;
+
+      const fromCol = prev.columns.find((c) => c.id === activeColumn);
+      const toCol = prev.columns.find((c) => c.id === overColumn);
+      if (!fromCol || !toCol) return prev;
+
+      const remaining = fromCol.cardIds.filter((id) => id !== activeId);
+      const overIsColumn = toCol.id === overId;
+      const insertAt = overIsColumn
+        ? toCol.cardIds.length
+        : (() => {
+            const idx = toCol.cardIds.indexOf(overId);
+            return idx === -1 ? toCol.cardIds.length : idx;
+          })();
+      const updatedTo = [...toCol.cardIds];
+      updatedTo.splice(insertAt, 0, activeId);
+
+      return {
+        ...prev,
+        columns: prev.columns.map((column) => {
+          if (column.id === activeColumn) return { ...column, cardIds: remaining };
+          if (column.id === overColumn) return { ...column, cardIds: updatedTo };
+          return column;
+        }),
+      };
+    });
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
+    const activeId = active.id as string;
+    const sourceColumnId = dragSourceColumnRef.current;
     setActiveCardId(null);
+    dragSourceColumnRef.current = null;
+    lastOverIdRef.current = null;
 
-    if (!over || active.id === over.id) {
-      return;
-    }
+    if (!over) return;
 
-    const overColumnId = resolveDragOverColumnId(over);
-    if (!overColumnId) {
-      return;
-    }
+    const currentBoard = boardRef.current;
+    const finalColumnId = findColumnId(currentBoard.columns, activeId);
+    if (!finalColumnId) return;
 
-    const nextColumns = moveCard(
-      board.columns,
-      active.id as string,
-      overColumnId
-    );
-    const targetDetails = getTargetDetails(board.columns, overColumnId);
-    const nextBoard = { ...board, columns: nextColumns };
+    const finalColumn = currentBoard.columns.find((c) => c.id === finalColumnId);
+    if (!finalColumn) return;
+    const finalIndex = finalColumn.cardIds.indexOf(activeId);
 
-    if (!targetDetails) {
-      setBoard(nextBoard);
+    if (finalColumnId === sourceColumnId) {
+      const overId = String(over.id);
+      if (overId !== activeId && finalColumn.cardIds.includes(overId)) {
+        const nextColumns = moveCard(currentBoard.columns, activeId, overId);
+        const reordered = nextColumns.find((c) => c.id === finalColumnId);
+        if (!reordered) return;
+        const reorderedIndex = reordered.cardIds.indexOf(activeId);
+        if (reorderedIndex === finalIndex) return;
+        const nextBoard = { ...currentBoard, columns: nextColumns };
+        sendBoardAction(
+          "move_card",
+          {
+            card_id: activeId,
+            target_column_id: finalColumnId,
+            target_index: reorderedIndex,
+          },
+          nextBoard
+        );
+      }
       return;
     }
 
     sendBoardAction(
       "move_card",
       {
-        card_id: active.id as string,
-        target_column_id: targetDetails.columnId,
-        target_index: targetDetails.index,
+        card_id: activeId,
+        target_column_id: finalColumnId,
+        target_index: finalIndex,
       },
-      nextBoard
+      currentBoard
     );
   };
 
@@ -225,77 +346,35 @@ export const KanbanBoard = () => {
 
   if (loadingBoard) {
     return (
-      <div className="min-h-screen bg-slate-50 px-6 py-16">
-        <div className="mx-auto max-w-xl rounded-[32px] border border-[var(--stroke)] bg-white p-10 shadow-[var(--shadow)]">
-          <p className="text-sm text-[var(--gray-text)]">Loading your board...</p>
-        </div>
-      </div>
+      <p className="text-sm text-[var(--gray-text)]">Loading your board...</p>
     );
   }
 
   return (
-    <div className="relative overflow-hidden">
-      <div className="pointer-events-none absolute left-0 top-0 h-[420px] w-[420px] -translate-x-1/3 -translate-y-1/3 rounded-full bg-[radial-gradient(circle,_rgba(32,157,215,0.25)_0%,_rgba(32,157,215,0.05)_55%,_transparent_70%)]" />
-      <div className="pointer-events-none absolute bottom-0 right-0 h-[520px] w-[520px] translate-x-1/4 translate-y-1/4 rounded-full bg-[radial-gradient(circle,_rgba(117,57,145,0.18)_0%,_rgba(117,57,145,0.05)_55%,_transparent_75%)]" />
-
-      <main className="relative mx-auto flex min-h-screen max-w-[1500px] flex-col gap-10 px-6 pb-16 pt-12">
-        <header className="flex flex-col gap-6 rounded-[32px] border border-[var(--stroke)] bg-white/80 p-8 shadow-[var(--shadow)] backdrop-blur">
-          <div className="flex flex-wrap items-start justify-between gap-6">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.35em] text-[var(--gray-text)]">
-                Single Board Kanban
-              </p>
-              <h1 className="mt-3 font-display text-4xl font-semibold text-[var(--navy-dark)]">
-                Kanban Studio
-              </h1>
-              <p className="mt-3 max-w-xl text-sm leading-6 text-[var(--gray-text)]">
-                Keep momentum visible. Rename columns, drag cards between stages,
-                and capture quick notes without getting buried in settings.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] px-5 py-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--gray-text)]">
-                Focus
-              </p>
-              <p className="mt-2 text-lg font-semibold text-[var(--primary-blue)]">
-                One board. Five columns. Zero clutter.
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-4">
-            {board.columns.map((column) => (
-              <div
-                key={column.id}
-                className="flex items-center gap-2 rounded-full border border-[var(--stroke)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--navy-dark)]"
-              >
-                <span className="h-2 w-2 rounded-full bg-[var(--accent-yellow)]" />
-                {column.title}
-              </div>
-            ))}
-          </div>
-          {(loadError || saveError) && (
-            <div className="grid gap-3">
-              {loadError && (
-                <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {loadError}
-                </div>
-              )}
-              {saveError && (
-                <div className="rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-700">
-                  {saveError}
-                </div>
-              )}
+    <div className="flex flex-col gap-6">
+      {(loadError || saveError) && (
+        <div className="grid gap-3">
+          {loadError && (
+            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {loadError}
             </div>
           )}
-        </header>
-
+          {saveError && (
+            <div className="rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-700">
+              {saveError}
+            </div>
+          )}
+        </div>
+      )}
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
         <DndContext
           sensors={sensors}
-          collisionDetection={closestCorners}
+          collisionDetection={collisionDetection}
           onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
         >
-          <section className="grid gap-6 lg:grid-cols-5">
+          <section className="grid flex-1 gap-6 sm:grid-cols-2 lg:grid-cols-5">
             {board.columns.map((column) => (
               <KanbanColumn
                 key={column.id}
@@ -315,7 +394,10 @@ export const KanbanBoard = () => {
             ) : null}
           </DragOverlay>
         </DndContext>
-      </main>
+        <div className="w-full lg:w-[360px] lg:flex-shrink-0">
+          <AiChat onBoardUpdated={setBoard} />
+        </div>
+      </div>
     </div>
   );
 };

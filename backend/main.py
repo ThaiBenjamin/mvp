@@ -1,10 +1,13 @@
 ﻿from pathlib import Path
 import hashlib
 import json
+import os
 import secrets
 import sqlite3
 from datetime import datetime, timedelta
 
+import httpx
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -14,10 +17,17 @@ BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR.parent / "frontend" / "out"
 DB_FILE = BASE_DIR / "pm.db"
 
+load_dotenv(BASE_DIR.parent / ".env")
+
 VALID_USERNAME = "user"
 VALID_PASSWORD = "password"
 SESSION_COOKIE_NAME = "session_token"
 SESSION_COOKIE_MAX_AGE = 3600
+
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_MODEL = "openai/gpt-oss-120b:free"
+CHAT_HISTORY_LIMIT = 20
 
 DEFAULT_BOARD_STATE = {
     "columns": [
@@ -121,6 +131,18 @@ def ensure_database():
                 token TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL,
                 expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
             )
@@ -425,6 +447,18 @@ def apply_board_action(board: dict, action: str, payload: dict) -> dict:
         if not source_column or not target_column:
             raise HTTPException(status_code=400, detail="Invalid column or card id")
 
+        if source_column["id"] == target_column_id:
+            reordered = [cid for cid in source_column["cardIds"] if cid != card_id]
+            if target_index is None or target_index < 0 or target_index > len(reordered):
+                reordered.append(card_id)
+            else:
+                reordered.insert(target_index, card_id)
+            board["columns"] = [
+                {**column, "cardIds": reordered} if column["id"] == source_column["id"] else column
+                for column in board["columns"]
+            ]
+            return board
+
         new_source_card_ids = [cid for cid in source_column["cardIds"] if cid != card_id]
         new_target_card_ids = target_column["cardIds"][:]
         if target_index is None or target_index < 0 or target_index > len(new_target_card_ids):
@@ -551,6 +585,233 @@ async def logout(request: Request):
     response_payload = JSONResponse({"authenticated": False})
     response_payload.delete_cookie(SESSION_COOKIE_NAME, path="/")
     return response_payload
+
+
+SYSTEM_PROMPT = """You are a project management assistant embedded in a Kanban app.
+
+The user has one Kanban board with fixed columns and freely titled cards. You can chat with the user and you may optionally modify the board.
+
+You ALWAYS respond with a single JSON object on its own (no surrounding prose, no markdown fences) shaped like:
+{"message": string, "boardUpdate": null | {"actions": [...]}}
+
+`boardUpdate.actions` is an array applied in order. Each action is one of:
+- {"type": "rename_column", "column_id": "<id>", "title": "<new title>"}
+- {"type": "add_card", "column_id": "<id>", "title": "<title>", "details": "<details>"}
+- {"type": "delete_card", "card_id": "<id>"}
+- {"type": "move_card", "card_id": "<id>", "target_column_id": "<id>", "target_index": <int>}
+
+Rules:
+- Use existing column ids and card ids from the supplied board state. Do not invent ids.
+- For new cards, omit the card id; the server will assign one.
+- Set boardUpdate to null when the user is just asking a question with no requested change.
+- Keep `message` short, friendly, and explain what you changed (if anything).
+- Output MUST be valid JSON. No code fences."""
+
+
+def load_chat_history(user_id: int) -> list[dict]:
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT role, content FROM chat_messages WHERE user_id = ? ORDER BY id ASC",
+            (user_id,),
+        )
+        return [{"role": role, "content": content} for role, content in cursor.fetchall()]
+
+
+def append_chat_message(user_id: int, role: str, content: str):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO chat_messages (user_id, role, content) VALUES (?, ?, ?)",
+            (user_id, role, content),
+        )
+        conn.commit()
+
+
+def clear_chat_history(user_id: int):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM chat_messages WHERE user_id = ?", (user_id,))
+        conn.commit()
+
+
+async def call_openrouter(messages: list[dict]) -> str:
+    if not OPENROUTER_API_KEY:
+        raise HTTPException(status_code=500, detail="OPENROUTER_API_KEY is not set")
+
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    body = {
+        "model": OPENROUTER_MODEL,
+        "messages": messages,
+        "response_format": {"type": "json_object"},
+    }
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(OPENROUTER_URL, headers=headers, json=body)
+        if response.status_code >= 400:
+            raise HTTPException(
+                status_code=502,
+                detail=f"OpenRouter error: {response.status_code} {response.text[:300]}",
+            )
+        data = response.json()
+
+    try:
+        return data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise HTTPException(status_code=502, detail=f"Unexpected OpenRouter response: {exc}")
+
+
+def parse_ai_response(raw: str) -> dict:
+    text = raw.strip()
+    if text.startswith("```"):
+        # Strip markdown fences if the model ignores instructions.
+        text = text.strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:].lstrip()
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=502, detail=f"AI returned invalid JSON: {exc}")
+
+    if not isinstance(parsed, dict) or "message" not in parsed:
+        raise HTTPException(status_code=502, detail="AI response missing 'message'")
+
+    parsed.setdefault("boardUpdate", None)
+    return parsed
+
+
+def apply_ai_board_update(board: dict, board_update: dict | None) -> tuple[dict, bool]:
+    if not board_update or not isinstance(board_update, dict):
+        return board, False
+
+    actions = board_update.get("actions")
+    if not isinstance(actions, list) or not actions:
+        return board, False
+
+    valid_column_ids = {col["id"] for col in board["columns"]}
+    changed = False
+
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        action_type = action.get("type")
+        if action_type == "rename_column":
+            column_id = action.get("column_id")
+            title = action.get("title")
+            if column_id in valid_column_ids and isinstance(title, str) and title.strip():
+                board = apply_board_action(
+                    board, "rename_column", {"column_id": column_id, "title": title.strip()}
+                )
+                changed = True
+        elif action_type == "add_card":
+            column_id = action.get("column_id")
+            title = action.get("title")
+            details = action.get("details", "No details yet.")
+            if column_id in valid_column_ids and isinstance(title, str) and title.strip():
+                board = apply_board_action(
+                    board,
+                    "add_card",
+                    {"column_id": column_id, "title": title.strip(), "details": details},
+                )
+                changed = True
+        elif action_type == "delete_card":
+            card_id = action.get("card_id")
+            if isinstance(card_id, str) and card_id in board["cards"]:
+                board = apply_board_action(board, "delete_card", {"card_id": card_id})
+                changed = True
+        elif action_type == "move_card":
+            card_id = action.get("card_id")
+            target_column_id = action.get("target_column_id")
+            target_index = action.get("target_index")
+            if (
+                isinstance(card_id, str)
+                and card_id in board["cards"]
+                and target_column_id in valid_column_ids
+            ):
+                board = apply_board_action(
+                    board,
+                    "move_card",
+                    {
+                        "card_id": card_id,
+                        "target_column_id": target_column_id,
+                        "target_index": target_index,
+                    },
+                )
+                changed = True
+
+    return board, changed
+
+
+@app.get("/api/chat/history")
+async def chat_history(request: Request):
+    user_id = require_authenticated(request)
+    return JSONResponse({"messages": load_chat_history(user_id)})
+
+
+@app.post("/api/chat/reset")
+async def chat_reset(request: Request):
+    user_id = require_authenticated(request)
+    clear_chat_history(user_id)
+    return JSONResponse({"messages": []})
+
+
+@app.post("/api/chat")
+async def chat(request: Request):
+    user_id = require_authenticated(request)
+    body = await request.json()
+    user_message = (body.get("message") or "").strip()
+    if not user_message:
+        raise HTTPException(status_code=400, detail="message is required")
+
+    board_state = load_board_state(user_id=user_id)
+    history = load_chat_history(user_id)[-CHAT_HISTORY_LIMIT:]
+
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "system",
+            "content": f"Current board state JSON:\n{json.dumps(board_state)}",
+        },
+        *history,
+        {"role": "user", "content": user_message},
+    ]
+
+    raw = await call_openrouter(messages)
+    parsed = parse_ai_response(raw)
+
+    updated_board, changed = apply_ai_board_update(board_state, parsed.get("boardUpdate"))
+    if changed:
+        save_board_state(updated_board, user_id=user_id)
+
+    append_chat_message(user_id, "user", user_message)
+    append_chat_message(user_id, "assistant", parsed["message"])
+
+    return JSONResponse(
+        {
+            "message": parsed["message"],
+            "boardUpdated": changed,
+            "board": updated_board if changed else None,
+        }
+    )
+
+
+@app.get("/api/ai/health")
+async def ai_health():
+    if not OPENROUTER_API_KEY:
+        return JSONResponse({"ok": False, "reason": "missing OPENROUTER_API_KEY"}, status_code=500)
+    try:
+        raw = await call_openrouter(
+            [
+                {"role": "system", "content": "Reply with the exact JSON {\"message\": \"4\", \"boardUpdate\": null}"},
+                {"role": "user", "content": "What is 2+2?"},
+            ]
+        )
+    except HTTPException as exc:
+        return JSONResponse({"ok": False, "reason": exc.detail}, status_code=exc.status_code)
+    return JSONResponse({"ok": True, "raw": raw})
 
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="frontend")
