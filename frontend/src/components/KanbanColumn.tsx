@@ -28,29 +28,28 @@ export const KanbanColumn = ({
   return (
     <section
       ref={setNodeRef}
-      className="flex min-h-[520px] flex-col rounded-3xl border border-[var(--stroke)] bg-[var(--surface-strong)] p-4 shadow-[var(--shadow)] transition"
+      className={clsx(
+        "flex min-h-[420px] flex-col rounded-2xl border border-[var(--stroke)] bg-[var(--surface-strong)] p-3 shadow-[0_8px_22px_rgba(3,33,71,0.06)] transition",
+        isOver && "border-[var(--accent-yellow)]"
+      )}
       data-testid={`column-${column.id}`}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="w-full">
-          <div className="flex items-center gap-3">
-            <div className="h-2 w-10 rounded-full bg-[var(--accent-yellow)]" />
-            <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">
-              {cards.length} cards
-            </span>
-          </div>
-          <input
-            value={column.title}
-            onChange={(event) => onRename(column.id, event.target.value)}
-            className="mt-3 w-full bg-transparent font-display text-lg font-semibold text-[var(--navy-dark)] outline-none"
-            aria-label="Column title"
-          />
-        </div>
-      </div>
+      <header className="mb-2 flex items-center gap-2 px-1">
+        <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--accent-yellow)]" />
+        <input
+          value={column.title}
+          onChange={(event) => onRename(column.id, event.target.value)}
+          className="min-w-0 flex-1 bg-transparent font-display text-sm font-semibold tracking-wide text-[var(--navy-dark)] outline-none"
+          aria-label="Column title"
+        />
+        <span className="flex-shrink-0 rounded-full bg-[var(--surface)] px-2 py-0.5 text-[10px] font-semibold tabular-nums text-[var(--gray-text)]">
+          {cards.length}
+        </span>
+      </header>
       <div
         className={clsx(
-          "mt-4 flex flex-1 flex-col gap-3",
-          isOver && "ring-2 ring-[var(--accent-yellow)]"
+          "flex flex-1 flex-col gap-2 rounded-xl p-1 transition",
+          isOver && "bg-[rgba(236,173,10,0.08)]"
         )}
       >
         <SortableContext items={column.cardIds} strategy={verticalListSortingStrategy}>
@@ -63,7 +62,7 @@ export const KanbanColumn = ({
           ))}
         </SortableContext>
         {cards.length === 0 && (
-          <div className="flex flex-1 items-center justify-center rounded-2xl border border-dashed border-[var(--stroke)] px-3 py-6 text-center text-xs font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">
+          <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-[var(--stroke)] px-3 py-6 text-center text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">
             Drop a card here
           </div>
         )}

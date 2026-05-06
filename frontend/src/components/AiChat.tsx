@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { BoardData } from "@/lib/kanban";
 import { api, type ChatMessage } from "@/lib/api";
+import { EraserIcon, SendIcon, SparkleIcon } from "@/components/icons";
 
 type AiChatProps = {
   onBoardUpdated: (nextBoard: BoardData) => void;
@@ -66,33 +67,40 @@ export const AiChat = ({ onBoardUpdated }: AiChatProps) => {
 
   return (
     <aside
-      className="flex h-[calc(100vh-2rem)] w-full flex-col rounded-3xl border border-[var(--stroke)] bg-white/90 shadow-[var(--shadow)] backdrop-blur lg:sticky lg:top-4"
+      className="flex h-[calc(100vh-2rem)] w-full flex-col rounded-2xl border border-[var(--stroke)] bg-white/95 shadow-[var(--shadow)] backdrop-blur lg:sticky lg:top-4"
       data-testid="ai-chat"
     >
-      <header className="flex items-center justify-between gap-3 border-b border-[var(--stroke)] px-5 py-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--gray-text)]">
-            Assistant
-          </p>
-          <p className="font-display text-lg font-semibold text-[var(--navy-dark)]">
-            Board Copilot
-          </p>
+      <header className="flex items-center justify-between gap-3 border-b border-[var(--stroke)] px-4 py-3">
+        <div className="flex items-center gap-2.5">
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[rgba(32,157,215,0.12)] text-[var(--primary-blue)]">
+            <SparkleIcon className="h-4 w-4" />
+          </span>
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">
+              Assistant
+            </p>
+            <p className="font-display text-sm font-semibold leading-tight text-[var(--navy-dark)]">
+              Board Copilot
+            </p>
+          </div>
         </div>
         <button
           type="button"
           onClick={handleReset}
-          className="rounded-full border border-[var(--stroke)] px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[var(--gray-text)] transition hover:bg-[var(--surface)]"
+          aria-label="Clear chat history"
+          title="Clear chat"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--stroke)] text-[var(--gray-text)] transition hover:bg-[var(--surface)] hover:text-[var(--navy-dark)]"
         >
-          Clear
+          <EraserIcon className="h-3.5 w-3.5" />
         </button>
       </header>
 
       <div
         ref={scrollRef}
-        className="flex flex-1 flex-col gap-3 overflow-y-auto px-5 py-4"
+        className="flex flex-1 flex-col gap-2.5 overflow-y-auto px-4 py-3"
       >
         {messages.length === 0 && (
-          <p className="text-sm leading-6 text-[var(--gray-text)]">
+          <p className="text-xs leading-6 text-[var(--gray-text)]">
             Ask the assistant to add, move, rename, or delete cards. For
             example: &ldquo;Move the analytics card to In Progress&rdquo;.
           </p>
@@ -102,8 +110,8 @@ export const AiChat = ({ onBoardUpdated }: AiChatProps) => {
             key={index}
             className={
               message.role === "user"
-                ? "self-end max-w-[85%] rounded-2xl bg-[var(--primary-blue)] px-4 py-2 text-sm text-white"
-                : "self-start max-w-[85%] rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] px-4 py-2 text-sm text-[var(--navy-dark)]"
+                ? "self-end max-w-[88%] rounded-2xl rounded-br-md bg-[var(--primary-blue)] px-3.5 py-2 text-xs leading-5 text-white"
+                : "self-start max-w-[88%] rounded-2xl rounded-bl-md border border-[var(--stroke)] bg-[var(--surface)] px-3.5 py-2 text-xs leading-5 text-[var(--navy-dark)]"
             }
             data-testid={`chat-message-${message.role}`}
           >
@@ -111,28 +119,28 @@ export const AiChat = ({ onBoardUpdated }: AiChatProps) => {
           </div>
         ))}
         {sending && (
-          <div className="self-start max-w-[85%] rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] px-4 py-2 text-sm italic text-[var(--gray-text)]">
+          <div className="self-start max-w-[88%] rounded-2xl rounded-bl-md border border-[var(--stroke)] bg-[var(--surface)] px-3.5 py-2 text-xs italic text-[var(--gray-text)]">
             Thinking…
           </div>
         )}
       </div>
 
       {error && (
-        <div className="mx-5 mb-2 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+        <div className="mx-4 mb-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
           {error}
         </div>
       )}
 
       <form
         onSubmit={handleSubmit}
-        className="flex items-end gap-2 border-t border-[var(--stroke)] px-5 py-4"
+        className="flex items-end gap-2 border-t border-[var(--stroke)] px-4 py-3"
       >
         <textarea
           value={input}
           onChange={(event) => setInput(event.target.value)}
           rows={2}
           placeholder="Ask the assistant…"
-          className="flex-1 resize-none rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--navy-dark)] outline-none focus:border-[var(--primary-blue)]"
+          className="flex-1 resize-none rounded-xl border border-[var(--stroke)] bg-[var(--surface)] px-3 py-2 text-xs leading-5 text-[var(--navy-dark)] outline-none focus:border-[var(--primary-blue)]"
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
@@ -143,9 +151,10 @@ export const AiChat = ({ onBoardUpdated }: AiChatProps) => {
         <button
           type="submit"
           disabled={sending || !input.trim()}
-          className="rounded-full bg-[var(--secondary-purple)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50"
+          aria-label="Send message"
+          className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--secondary-purple)] text-white transition hover:brightness-110 disabled:opacity-50"
         >
-          Send
+          <SendIcon className="h-4 w-4" />
         </button>
       </form>
     </aside>

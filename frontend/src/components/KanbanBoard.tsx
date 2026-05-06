@@ -267,13 +267,13 @@ export const KanbanBoard = () => {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       {saveError && (
-        <div className="rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-700">
+        <div className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-2.5 text-sm text-orange-700">
           {saveError}
         </div>
       )}
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
         <DndContext
           sensors={sensors}
           collisionDetection={collisionDetection}
@@ -281,7 +281,7 @@ export const KanbanBoard = () => {
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
         >
-          <section className="grid flex-1 gap-6 sm:grid-cols-2 lg:grid-cols-5">
+          <section className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             {board.columns.map((column) => (
               <KanbanColumn
                 key={column.id}
@@ -295,13 +295,13 @@ export const KanbanBoard = () => {
           </section>
           <DragOverlay>
             {activeCard ? (
-              <div className="w-[260px]">
+              <div className="w-[240px]">
                 <KanbanCardPreview card={activeCard} />
               </div>
             ) : null}
           </DragOverlay>
         </DndContext>
-        <div className="w-full lg:w-[360px] lg:flex-shrink-0">
+        <div className="w-full lg:w-[320px] lg:flex-shrink-0">
           <AiChat onBoardUpdated={setBoard} />
         </div>
       </div>
