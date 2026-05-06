@@ -1,16 +1,26 @@
 import clsx from "clsx";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import type { Card, Column } from "@/lib/kanban";
+import type { Card, Column, Priority } from "@/lib/kanban";
 import { KanbanCard } from "@/components/KanbanCard";
 import { NewCardForm } from "@/components/NewCardForm";
+import { TrashIcon } from "@/components/icons";
 
 type KanbanColumnProps = {
   column: Column;
   cards: Card[];
   onRename: (columnId: string, title: string) => void;
-  onAddCard: (columnId: string, title: string, details: string) => void;
+  onAddCard: (
+    columnId: string,
+    title: string,
+    details: string,
+    priority: Priority,
+    dueDate: string | null
+  ) => void;
   onDeleteCard: (columnId: string, cardId: string) => void;
+  onEditCard: (card: Card) => void;
+  onDeleteColumn: (columnId: string) => void;
+  canDeleteColumn: boolean;
 };
 
 export const KanbanColumn = ({
@@ -19,11 +29,16 @@ export const KanbanColumn = ({
   onRename,
   onAddCard,
   onDeleteCard,
+  onEditCard,
+  onDeleteColumn,
+  canDeleteColumn,
 }: KanbanColumnProps) => {
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
     data: { columnId: column.id },
   });
+
+  const canDelete = canDeleteColumn && cards.length === 0;
 
   return (
     <section
@@ -34,7 +49,7 @@ export const KanbanColumn = ({
       )}
       data-testid={`column-${column.id}`}
     >
-      <header className="mb-2 flex items-center gap-2 px-1">
+      <header className="group mb-2 flex items-center gap-2 px-1">
         <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--accent-yellow)]" />
         <input
           value={column.title}
@@ -45,6 +60,22 @@ export const KanbanColumn = ({
         <span className="flex-shrink-0 rounded-full bg-[var(--surface)] px-2 py-0.5 text-[10px] font-semibold tabular-nums text-[var(--gray-text)]">
           {cards.length}
         </span>
+        <button
+          type="button"
+          onClick={() => onDeleteColumn(column.id)}
+          disabled={!canDelete}
+          aria-label={`Delete column ${column.title}`}
+          title={
+            canDeleteColumn
+              ? cards.length === 0
+                ? "Delete column"
+                : "Move all cards out before deleting"
+              : "Cannot delete the only column"
+          }
+          className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[var(--gray-text)] opacity-0 transition group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30"
+        >
+          <TrashIcon className="h-3 w-3" />
+        </button>
       </header>
       <div
         className={clsx(
@@ -58,6 +89,7 @@ export const KanbanColumn = ({
               key={card.id}
               card={card}
               onDelete={(cardId) => onDeleteCard(column.id, cardId)}
+              onEdit={onEditCard}
             />
           ))}
         </SortableContext>
@@ -68,7 +100,9 @@ export const KanbanColumn = ({
         )}
       </div>
       <NewCardForm
-        onAdd={(title, details) => onAddCard(column.id, title, details)}
+        onAdd={(title, details, priority, dueDate) =>
+          onAddCard(column.id, title, details, priority, dueDate)
+        }
       />
     </section>
   );

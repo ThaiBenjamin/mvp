@@ -1,9 +1,10 @@
-"""End-to-end HTTP tests for the board endpoints (no live AI)."""
+"""End-to-end HTTP tests for the legacy single-board endpoints (no live AI)."""
 from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.boards import first_board_id
 from backend.chat import append_chat_message
 from backend.main import app
 
@@ -47,6 +48,8 @@ def test_add_then_delete_card(client):
     new_id = next(cid for cid in body["columns"][0]["cardIds"] if cid not in ("card-1", "card-2"))
     assert new_id.startswith("card-")
     assert body["cards"][new_id]["title"] == "New"
+    assert body["cards"][new_id]["priority"] == "medium"
+    assert body["cards"][new_id]["dueDate"] is None
 
     response = client.post("/api/board/actions", json={
         "action": "delete_card",
@@ -78,8 +81,9 @@ def test_chat_history_starts_empty(client):
 
 def test_chat_reset_clears_history(client):
     user_id = 1
-    append_chat_message(user_id, "user", "hi")
-    append_chat_message(user_id, "assistant", "hello")
+    board_id = first_board_id(user_id)
+    append_chat_message(user_id, board_id, "user", "hi")
+    append_chat_message(user_id, board_id, "assistant", "hello")
     response = client.post("/api/chat/reset")
     assert response.json() == {"messages": []}
     assert client.get("/api/chat/history").json() == {"messages": []}

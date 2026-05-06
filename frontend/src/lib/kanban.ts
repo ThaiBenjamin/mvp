@@ -1,7 +1,11 @@
+export type Priority = "low" | "medium" | "high";
+
 export type Card = {
   id: string;
   title: string;
   details: string;
+  priority: Priority;
+  dueDate: string | null;
 };
 
 export type Column = {
@@ -14,6 +18,17 @@ export type BoardData = {
   columns: Column[];
   cards: Record<string, Card>;
 };
+
+export type BoardSummary = {
+  id: number;
+  name: string;
+  position: number;
+  archived: boolean;
+  version: number;
+  updatedAt: string;
+};
+
+export type BoardWithMeta = BoardSummary & BoardData;
 
 export const initialData: BoardData = {
   columns: [
@@ -32,41 +47,57 @@ export const initialData: BoardData = {
       id: "card-1",
       title: "Align roadmap themes",
       details: "Draft quarterly themes with impact statements and metrics.",
+      priority: "medium",
+      dueDate: null,
     },
     "card-2": {
       id: "card-2",
       title: "Gather customer signals",
       details: "Review support tags, sales notes, and churn feedback.",
+      priority: "medium",
+      dueDate: null,
     },
     "card-3": {
       id: "card-3",
       title: "Prototype analytics view",
       details: "Sketch initial dashboard layout and key drill-downs.",
+      priority: "high",
+      dueDate: null,
     },
     "card-4": {
       id: "card-4",
       title: "Refine status language",
       details: "Standardize column labels and tone across the board.",
+      priority: "medium",
+      dueDate: null,
     },
     "card-5": {
       id: "card-5",
       title: "Design card layout",
       details: "Add hierarchy and spacing for scanning dense lists.",
+      priority: "low",
+      dueDate: null,
     },
     "card-6": {
       id: "card-6",
       title: "QA micro-interactions",
       details: "Verify hover, focus, and loading states.",
+      priority: "medium",
+      dueDate: null,
     },
     "card-7": {
       id: "card-7",
       title: "Ship marketing page",
       details: "Final copy approved and asset pack delivered.",
+      priority: "high",
+      dueDate: null,
     },
     "card-8": {
       id: "card-8",
       title: "Close onboarding sprint",
       details: "Document release notes and share internally.",
+      priority: "low",
+      dueDate: null,
     },
   },
 };
@@ -165,4 +196,33 @@ export const createId = (prefix: string) => {
   const randomPart = Math.random().toString(36).slice(2, 8);
   const timePart = Date.now().toString(36);
   return `${prefix}-${randomPart}${timePart}`;
+};
+
+export const PRIORITY_LABEL: Record<Priority, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+};
+
+export const PRIORITY_DOT: Record<Priority, string> = {
+  low: "bg-emerald-400",
+  medium: "bg-[var(--accent-yellow)]",
+  high: "bg-red-500",
+};
+
+export const formatDueDate = (iso: string | null): string | null => {
+  if (!iso) return null;
+  // Show YYYY-MM-DD as a friendlier "MMM D" string when valid.
+  const date = new Date(iso.length === 10 ? `${iso}T00:00:00` : iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+};
+
+export const isOverdue = (iso: string | null): boolean => {
+  if (!iso) return false;
+  const date = new Date(iso.length === 10 ? `${iso}T00:00:00` : iso);
+  if (Number.isNaN(date.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return date.getTime() < today.getTime();
 };

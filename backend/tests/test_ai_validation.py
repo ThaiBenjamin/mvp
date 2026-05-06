@@ -17,7 +17,7 @@ def board():
             {"id": "col-b", "title": "B", "cardIds": []},
         ],
         "cards": {
-            "c1": {"id": "c1", "title": "One", "details": "x"},
+            "c1": {"id": "c1", "title": "One", "details": "x", "priority": "medium", "dueDate": None},
         },
     }
 
@@ -100,3 +100,37 @@ def test_apply_ai_chained_actions(board):
     assert changed is True
     assert out["columns"][1]["cardIds"] == ["c1"]
     assert out["columns"][1]["title"] == "Done"
+
+
+def test_apply_ai_update_card_with_priority(board):
+    out, changed = apply_ai_board_update(board, {"actions": [
+        {"type": "update_card", "card_id": "c1", "priority": "high", "dueDate": "2026-12-01"},
+    ]})
+    assert changed is True
+    assert out["cards"]["c1"]["priority"] == "high"
+    assert out["cards"]["c1"]["dueDate"] == "2026-12-01"
+
+
+def test_apply_ai_add_column(board):
+    out, changed = apply_ai_board_update(board, {"actions": [
+        {"type": "add_column", "title": "Frozen"},
+    ]})
+    assert changed is True
+    assert out["columns"][-1]["title"] == "Frozen"
+
+
+def test_apply_ai_delete_empty_column(board):
+    out, changed = apply_ai_board_update(board, {"actions": [
+        {"type": "delete_column", "column_id": "col-b"},
+    ]})
+    assert changed is True
+    assert all(c["id"] != "col-b" for c in out["columns"])
+
+
+def test_apply_ai_delete_column_with_cards_rejected(board):
+    out, changed = apply_ai_board_update(board, {"actions": [
+        {"type": "delete_column", "column_id": "col-a"},
+    ]})
+    # The action raises internally and is dropped.
+    assert changed is False
+    assert any(c["id"] == "col-a" for c in out["columns"])

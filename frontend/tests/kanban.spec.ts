@@ -41,9 +41,9 @@ const dragCardTo = async (page: Page, source: Locator, target: Locator) => {
   await page.mouse.up();
 };
 
-const signIn = async (page: any) => {
+const signIn = async (page: import("@playwright/test").Page) => {
   await page.goto("/");
-  const loginTitle = page.getByRole("heading", { name: "Project Management MVP" });
+  const loginTitle = page.getByRole("heading", { name: /Project Management/ });
   const boardTitle = page.getByRole("heading", { name: "Kanban Studio" }).first();
 
   // Wait for the auth state to settle: either the login form or the board appears.

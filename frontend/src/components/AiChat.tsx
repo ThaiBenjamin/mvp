@@ -7,9 +7,10 @@ import { EraserIcon, SendIcon, SparkleIcon } from "@/components/icons";
 
 type AiChatProps = {
   onBoardUpdated: (nextBoard: BoardData) => void;
+  boardId?: number;
 };
 
-export const AiChat = ({ onBoardUpdated }: AiChatProps) => {
+export const AiChat = ({ onBoardUpdated, boardId }: AiChatProps) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -17,13 +18,14 @@ export const AiChat = ({ onBoardUpdated }: AiChatProps) => {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
+    setMessages([]);
     api
-      .getChatHistory()
+      .getChatHistory(boardId)
       .then((data) => setMessages(data.messages || []))
       .catch(() => {
         /* empty history is fine */
       });
-  }, []);
+  }, [boardId]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -43,7 +45,7 @@ export const AiChat = ({ onBoardUpdated }: AiChatProps) => {
     setError(null);
 
     try {
-      const data = await api.sendChat(trimmed);
+      const data = await api.sendChat(trimmed, boardId);
       setMessages((prev) => [...prev, { role: "assistant", content: data.message }]);
       if (data.boardUpdated && data.board) {
         onBoardUpdated(data.board);
@@ -57,7 +59,7 @@ export const AiChat = ({ onBoardUpdated }: AiChatProps) => {
 
   const handleReset = async () => {
     try {
-      await api.resetChat();
+      await api.resetChat(boardId);
       setMessages([]);
       setError(null);
     } catch {

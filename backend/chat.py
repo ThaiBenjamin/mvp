@@ -16,33 +16,45 @@ from .ai import (
     parse_ai_response,
 )
 from .auth import require_user
-from .boards import load_board_state, save_board_state
+from .boards import (
+    first_board_id,
+    load_board_state,
+    require_board,
+    save_board_state,
+)
 from .db import get_connection
 
 
 # ----------------------------------------------------------------- DB ops
 
-def load_chat_history(user_id: int) -> list[dict]:
+def load_chat_history(user_id: int, board_id: int) -> list[dict]:
     with get_connection() as conn:
         cursor = conn.execute(
-            "SELECT role, content FROM chat_messages WHERE user_id = ? ORDER BY id ASC",
-            (user_id,),
+            """
+            SELECT role, content FROM chat_messages
+             WHERE user_id = ? AND board_id = ?
+             ORDER BY id ASC
+            """,
+            (user_id, board_id),
         )
         return [{"role": role, "content": content} for role, content in cursor.fetchall()]
 
 
-def append_chat_message(user_id: int, role: str, content: str) -> None:
+def append_chat_message(user_id: int, board_id: int, role: str, content: str) -> None:
     with get_connection() as conn:
         conn.execute(
-            "INSERT INTO chat_messages (user_id, role, content) VALUES (?, ?, ?)",
-            (user_id, role, content),
+            "INSERT INTO chat_messages (user_id, board_id, role, content) VALUES (?, ?, ?, ?)",
+            (user_id, board_id, role, content),
         )
         conn.commit()
 
 
-def clear_chat_history(user_id: int) -> None:
+def clear_chat_history(user_id: int, board_id: int) -> None:
     with get_connection() as conn:
-        conn.execute("DELETE FROM chat_messages WHERE user_id = ?", (user_id,))
+        conn.execute(
+            "DELETE FROM chat_messages WHERE user_id = ? AND board_id = ?",
+            (user_id, board_id),
+        )
         conn.commit()
 
 
@@ -50,6 +62,7 @@ def clear_chat_history(user_id: int) -> None:
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
+    board_id: int | None = None
 
 
 # -------------------------------------------------------------- HTTP API
@@ -57,14 +70,29 @@ class ChatRequest(BaseModel):
 router = APIRouter(prefix="/api", tags=["chat"])
 
 
+def _resolve_board_id(user_id: int, board_id: int | None) -> int:
+    if board_id is None:
+        return first_board_id(user_id)
+    require_board(board_id, user_id)
+    return board_id
+
+
 @router.get("/chat/history")
-async def chat_history(user_id: Annotated[int, Depends(require_user)]):
-    return {"messages": load_chat_history(user_id)}
+async def chat_history(
+    user_id: Annotated[int, Depends(require_user)],
+    board_id: int | None = None,
+):
+    resolved = _resolve_board_id(user_id, board_id)
+    return {"messages": load_chat_history(user_id, resolved)}
 
 
 @router.post("/chat/reset")
-async def chat_reset(user_id: Annotated[int, Depends(require_user)]):
-    clear_chat_history(user_id)
+async def chat_reset(
+    user_id: Annotated[int, Depends(require_user)],
+    board_id: int | None = None,
+):
+    resolved = _resolve_board_id(user_id, board_id)
+    clear_chat_history(user_id, resolved)
     return {"messages": []}
 
 
@@ -74,8 +102,9 @@ async def chat(req: ChatRequest, user_id: Annotated[int, Depends(require_user)])
     if not user_message:
         raise HTTPException(status_code=400, detail="message is required")
 
-    board_state = load_board_state(user_id=user_id)
-    history = load_chat_history(user_id)[-config.CHAT_HISTORY_LIMIT:]
+    board_id = _resolve_board_id(user_id, req.board_id)
+    board_state = load_board_state(board_id=board_id, user_id=user_id)
+    history = load_chat_history(user_id, board_id)[-config.CHAT_HISTORY_LIMIT:]
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -89,15 +118,16 @@ async def chat(req: ChatRequest, user_id: Annotated[int, Depends(require_user)])
 
     updated_board, changed = apply_ai_board_update(board_state, parsed.get("boardUpdate"))
     if changed:
-        save_board_state(updated_board, user_id=user_id)
+        save_board_state(updated_board, board_id=board_id, user_id=user_id)
 
-    append_chat_message(user_id, "user", user_message)
-    append_chat_message(user_id, "assistant", parsed["message"])
+    append_chat_message(user_id, board_id, "user", user_message)
+    append_chat_message(user_id, board_id, "assistant", parsed["message"])
 
     return {
         "message": parsed["message"],
         "boardUpdated": changed,
         "board": updated_board if changed else None,
+        "boardId": board_id,
     }
 
 

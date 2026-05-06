@@ -11,11 +11,11 @@ This project is building a Project Management App. Key features:
 
 ## Limitations
 
-For the MVP, there will only be a user sign in (hardcoded to 'user' and 'password') but the database will support multiple users for future.
+For the MVP, this will run locally (in a docker container).
 
-For the MVP, there will only be 1 Kanban board per signed in user.
-
-For the MVP, this will run locally (in a docker container)
+The seeded `user` / `password` account remains available for the demo, but
+self-service registration via `POST /api/register` is also supported, and
+each user owns multiple boards with per-board chat history.
 
 ## Technical Decisions
 

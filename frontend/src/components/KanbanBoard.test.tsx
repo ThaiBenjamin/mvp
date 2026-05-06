@@ -7,9 +7,9 @@ import { initialData } from "@/lib/kanban";
 const getFirstColumn = () => screen.getAllByTestId(/column-/i)[0];
 
 const createFetchResponse = (payload: unknown) =>
-  Promise.resolve({ ok: true, json: async () => payload });
+  Promise.resolve({ ok: true, status: 200, json: async () => payload });
 
-describe("KanbanBoard", () => {
+describe("KanbanBoard (legacy single-board mode)", () => {
   const fetchMock = vi.fn();
   let originalFetch: typeof globalThis.fetch;
 
@@ -20,6 +20,10 @@ describe("KanbanBoard", () => {
     fetchMock.mockImplementation(async (input: string, init?: RequestInit) => {
       if (input === "/api/board") {
         return createFetchResponse(currentBoard);
+      }
+
+      if (input.startsWith("/api/chat/history")) {
+        return createFetchResponse({ messages: [] });
       }
 
       if (input === "/api/board/actions") {
@@ -48,6 +52,8 @@ describe("KanbanBoard", () => {
                 id: cardId,
                 title: payload.title,
                 details: payload.details,
+                priority: payload.priority ?? "medium",
+                dueDate: payload.dueDate ?? null,
               },
             },
             columns: currentBoard.columns.map((column) =>
@@ -73,10 +79,29 @@ describe("KanbanBoard", () => {
           };
         }
 
+        if (action === "update_card") {
+          currentBoard = {
+            ...currentBoard,
+            cards: {
+              ...currentBoard.cards,
+              [payload.card_id]: {
+                ...currentBoard.cards[payload.card_id],
+                title: payload.title ?? currentBoard.cards[payload.card_id].title,
+                details:
+                  payload.details ?? currentBoard.cards[payload.card_id].details,
+                priority:
+                  payload.priority ?? currentBoard.cards[payload.card_id].priority,
+                dueDate:
+                  payload.dueDate ?? currentBoard.cards[payload.card_id].dueDate,
+              },
+            },
+          };
+        }
+
         return createFetchResponse(currentBoard);
       }
 
-      return Promise.resolve({ ok: false, json: async () => ({}) });
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
     });
 
     Object.defineProperty(globalThis, "fetch", {
@@ -153,5 +178,32 @@ describe("KanbanBoard", () => {
     await userEvent.click(deleteButton);
 
     expect(within(column).queryByText("New card")).not.toBeInTheDocument();
+  });
+
+  it("opens the edit modal and saves changes", async () => {
+    render(<KanbanBoard />);
+    await waitFor(() => expect(screen.getAllByTestId(/column-/i)).toHaveLength(5));
+
+    const column = getFirstColumn();
+    const editButton = within(column).getAllByRole("button", { name: /^edit /i })[0];
+    await userEvent.click(editButton);
+
+    const modal = await screen.findByTestId("card-edit-modal");
+    const titleInput = within(modal).getByLabelText(/title/i);
+    await userEvent.clear(titleInput);
+    await userEvent.type(titleInput, "Updated title");
+    const priority = within(modal).getByLabelText(/priority/i);
+    await userEvent.selectOptions(priority, "high");
+
+    await userEvent.click(within(modal).getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => {
+      const updates = fetchMock.mock.calls.filter(([url, init]) => {
+        if (url !== "/api/board/actions") return false;
+        const body = JSON.parse((init as RequestInit).body as string);
+        return body.action === "update_card";
+      });
+      expect(updates.length).toBeGreaterThanOrEqual(1);
+    });
   });
 });

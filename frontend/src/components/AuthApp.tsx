@@ -1,38 +1,49 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { KanbanBoard } from "@/components/KanbanBoard";
+import { BoardWorkspace } from "@/components/BoardWorkspace";
 import { LayoutIcon, LogOutIcon } from "@/components/icons";
 import { api, ApiError } from "@/lib/api";
 import type { SessionInfo } from "@/lib/api";
 
 type Session = SessionInfo;
 
-type LoginProps = {
-  onLogin: (username: string, password: string) => Promise<void>;
+type AuthFormProps = {
+  mode: "login" | "register";
+  onSubmit: (
+    username: string,
+    password: string,
+    displayName?: string
+  ) => Promise<void>;
   error: string | null;
+  onSwitch: () => void;
 };
 
-const LoginForm = ({ onLogin, error }: LoginProps) => {
+const AuthForm = ({ mode, onSubmit, error, onSwitch }: AuthFormProps) => {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setLoading(true);
-    await onLogin(username.trim(), password.trim());
+    await onSubmit(username.trim(), password, displayName.trim() || undefined);
     setLoading(false);
   };
+
+  const isRegister = mode === "register";
 
   return (
     <main className="min-h-screen bg-slate-50 px-6 py-16">
       <div className="mx-auto max-w-xl rounded-[32px] border border-[var(--stroke)] bg-white p-10 shadow-[var(--shadow)]">
         <h1 className="font-display text-3xl font-semibold text-[var(--navy-dark)]">
-          Project Management MVP
+          {isRegister ? "Create your account" : "Project Management"}
         </h1>
         <p className="mt-3 text-sm leading-6 text-[var(--gray-text)]">
-          Sign in with the demo credentials to access your Kanban board.
+          {isRegister
+            ? "Sign up to start managing your boards."
+            : "Sign in to access your boards. Demo: user / password"}
         </p>
         <form className="mt-8 flex flex-col gap-4" onSubmit={handleSubmit}>
           <label className="space-y-2 text-sm text-[var(--navy-dark)]">
@@ -41,11 +52,24 @@ const LoginForm = ({ onLogin, error }: LoginProps) => {
               value={username}
               onChange={(event) => setUsername(event.target.value)}
               className="w-full rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] px-4 py-3 outline-none"
-              placeholder="user"
+              placeholder={isRegister ? "Choose a username" : "user"}
               autoComplete="username"
               required
+              minLength={isRegister ? 3 : 1}
             />
           </label>
+          {isRegister && (
+            <label className="space-y-2 text-sm text-[var(--navy-dark)]">
+              Display name (optional)
+              <input
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+                className="w-full rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] px-4 py-3 outline-none"
+                placeholder="How should we refer to you?"
+                maxLength={64}
+              />
+            </label>
+          )}
           <label className="space-y-2 text-sm text-[var(--navy-dark)]">
             Password
             <input
@@ -53,20 +77,34 @@ const LoginForm = ({ onLogin, error }: LoginProps) => {
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               className="w-full rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] px-4 py-3 outline-none"
-              placeholder="password"
-              autoComplete="current-password"
+              placeholder={isRegister ? "At least 6 characters" : "password"}
+              autoComplete={isRegister ? "new-password" : "current-password"}
               required
+              minLength={isRegister ? 6 : 1}
             />
           </label>
-          {error ? (
-            <p className="text-sm text-red-600">{error}</p>
-          ) : null}
+          {error ? <p className="text-sm text-red-600">{error}</p> : null}
           <button
             type="submit"
             disabled={loading}
             className="rounded-full bg-[var(--primary-blue)] px-6 py-3 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
           >
-            {loading ? "Signing in..." : "Sign in"}
+            {loading
+              ? isRegister
+                ? "Creating account..."
+                : "Signing in..."
+              : isRegister
+                ? "Create account"
+                : "Sign in"}
+          </button>
+          <button
+            type="button"
+            onClick={onSwitch}
+            className="text-xs font-semibold uppercase tracking-wide text-[var(--primary-blue)] hover:underline"
+          >
+            {isRegister
+              ? "Already have an account? Sign in"
+              : "New here? Create an account"}
           </button>
         </form>
       </div>
@@ -78,6 +116,7 @@ export default function AuthApp() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<"login" | "register">("login");
 
   useEffect(() => {
     api
@@ -91,7 +130,11 @@ export default function AuthApp() {
     setError(null);
     try {
       const result = await api.login(username, password);
-      setSession({ authenticated: true, username: result.username ?? username });
+      setSession({
+        authenticated: true,
+        username: result.username ?? username,
+        displayName: result.displayName ?? username,
+      });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setError("Invalid username or password.");
@@ -101,11 +144,42 @@ export default function AuthApp() {
     }
   };
 
+  const handleRegister = async (
+    username: string,
+    password: string,
+    displayName?: string
+  ) => {
+    setError(null);
+    try {
+      const result = await api.register(username, password, displayName);
+      setSession({
+        authenticated: true,
+        username: result.username ?? username,
+        displayName: result.displayName ?? displayName ?? username,
+      });
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 409) {
+          setError("That username is taken. Try another.");
+          return;
+        }
+        if (err.status === 422) {
+          setError(
+            "Username must be 3-32 chars (letters, digits, '.', '-', '_'). Password must be 6+ characters."
+          );
+          return;
+        }
+      }
+      setError("Unable to create account. Please try again.");
+    }
+  };
+
   const handleLogout = async () => {
     try {
       await api.logout();
     } finally {
       setSession({ authenticated: false });
+      setMode("login");
     }
   };
 
@@ -120,7 +194,21 @@ export default function AuthApp() {
   }
 
   if (!session?.authenticated) {
-    return <LoginForm onLogin={handleLogin} error={error} />;
+    return (
+      <AuthForm
+        mode={mode}
+        error={error}
+        onSubmit={
+          mode === "register"
+            ? handleRegister
+            : (u, p) => handleLogin(u, p)
+        }
+        onSwitch={() => {
+          setError(null);
+          setMode((prev) => (prev === "login" ? "register" : "login"));
+        }}
+      />
+    );
   }
 
   return (
@@ -139,19 +227,15 @@ export default function AuthApp() {
                 Kanban Studio
               </h1>
               <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-[var(--gray-text)]">
-                Single Board Kanban
+                Multi-board project management
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="hidden items-center gap-2 rounded-full border border-[var(--stroke)] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--navy-dark)] sm:inline-flex">
-              <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-yellow)]" />
-              Organized by status
-            </span>
             <span className="inline-flex items-center gap-2 rounded-full border border-[var(--stroke)] bg-[var(--surface)] px-3 py-1.5 text-xs">
               <span className="text-[var(--gray-text)]">Signed in as</span>
               <span className="font-semibold text-[var(--primary-blue)]">
-                {session.username || "user"}
+                {session.displayName || session.username || "user"}
               </span>
             </span>
             <button
@@ -167,7 +251,7 @@ export default function AuthApp() {
           </div>
         </header>
 
-        <KanbanBoard />
+        <BoardWorkspace />
       </main>
     </div>
   );

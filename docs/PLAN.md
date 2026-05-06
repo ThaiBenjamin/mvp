@@ -165,6 +165,76 @@ Tests:
 - End-to-end tests for the chat flow.
 - Verify board updates from AI are applied and shown in the UI.
 
+## Part 11: User management
+
+- Add `POST /api/register` for self-service signup with bcrypt-hashed passwords.
+- Add `GET /api/me` and `PATCH /api/me` for profile reads + display-name and
+  password changes.
+- Each new user is seeded with a default `My Board` so the first sign-in lands
+  on a usable board.
+
+Success criteria:
+- Two distinct users can register and only see their own boards and chat.
+- Profile updates persist across logout/login.
+
+Tests:
+- `backend/tests/test_register.py` covers happy path, duplicate username,
+  invalid username characters, short password, board isolation across users,
+  and profile updates.
+
+## Part 12: Multiple boards per user
+
+- Migrate `boards` to drop the `UNIQUE(user_id)` constraint and add `name`,
+  `position`, `archived` columns. Existing rows become "My Board" at position 0.
+- Add `GET/POST /api/boards`, `PATCH/DELETE /api/boards/{id}`,
+  `GET /api/boards/{id}` and `POST /api/boards/{id}/actions`.
+- Refuse to delete a user's only board so the UI always has one to render.
+- Frontend gains a sidebar (`BoardWorkspace` + `BoardSidebar`) that switches
+  between boards and remembers the active board in `localStorage`.
+
+Success criteria:
+- A user can create, rename, switch between, and delete boards.
+- Card/column actions only mutate the targeted board's state.
+
+Tests:
+- `backend/tests/test_multiboard.py`: list/create/rename/delete, scoping,
+  cross-user isolation, 404 for unknown ids.
+- `frontend/src/components/BoardSidebar.test.tsx`.
+
+## Part 13: Richer cards and columns
+
+- Add `priority` (low/medium/high) and `dueDate` fields to each card; the
+  `repair_board_state` normalizer fills sensible defaults for legacy data.
+- New board actions: `update_card`, `add_column`, `delete_column` (refuses
+  non-empty columns), and `move_column`.
+- Frontend `KanbanCard` shows priority + due-date pills with overdue styling;
+  `CardEditModal` allows editing all fields.
+- AI prompt + validator extended to accept the new action types.
+
+Success criteria:
+- Users can edit any card field and reorder/add/delete columns.
+- The AI assistant can drive the new actions.
+
+Tests:
+- `backend/tests/test_card_columns.py` and additions to
+  `test_ai_validation.py`.
+- `frontend/src/components/CardEditModal.test.tsx`.
+
+## Part 14: Per-board AI chat
+
+- `chat_messages` gains a `board_id` column so each board has its own
+  assistant conversation.
+- `GET /api/chat/history` and `POST /api/chat/reset` accept an optional
+  `board_id` query parameter; `POST /api/chat` accepts it in the body.
+- The frontend `AiChat` re-fetches when the active board changes.
+
+Success criteria:
+- Switching boards shows the chat history for that board only.
+- Resetting chat for one board does not clear another's.
+
+Tests:
+- `backend/tests/test_chat_scoping.py`.
+
 ## Notes
 
 - Keep the implementation minimal and avoid over-engineering.
