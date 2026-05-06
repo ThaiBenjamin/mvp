@@ -2,11 +2,10 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { KanbanBoard } from "@/components/KanbanBoard";
+import { api, ApiError } from "@/lib/api";
+import type { SessionInfo } from "@/lib/api";
 
-type Session = {
-  authenticated: boolean;
-  username?: string;
-};
+type Session = SessionInfo;
 
 type LoginProps = {
   onLogin: (username: string, password: string) => Promise<void>;
@@ -80,53 +79,30 @@ export default function AuthApp() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const loadSession = async () => {
-      try {
-        const response = await fetch("/api/session");
-        if (!response.ok) {
-          setSession({ authenticated: false });
-          return;
-        }
-
-        const result = await response.json();
-        setSession(result);
-      } catch {
-        setSession({ authenticated: false });
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadSession();
+    api
+      .getSession()
+      .then(setSession)
+      .catch(() => setSession({ authenticated: false }))
+      .finally(() => setLoading(false));
   }, []);
 
   const handleLogin = async (username: string, password: string) => {
     setError(null);
-
     try {
-      const response = await fetch("/api/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          setError("Invalid username or password.");
-          return;
-        }
-        throw new Error("Login failed");
-      }
-
-      setSession({ authenticated: true, username });
+      const result = await api.login(username, password);
+      setSession({ authenticated: true, username: result.username ?? username });
     } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        setError("Invalid username or password.");
+        return;
+      }
       setError("Unable to sign in. Please try again.");
     }
   };
 
   const handleLogout = async () => {
     try {
-      await fetch("/api/logout", { method: "POST" });
+      await api.logout();
     } finally {
       setSession({ authenticated: false });
     }

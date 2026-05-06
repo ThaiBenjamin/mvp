@@ -6,19 +6,35 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 // across multiple droppables. This helper performs an explicit multi-step
 // drag that mimics a real user.
 const dragCardTo = async (page: Page, source: Locator, target: Locator) => {
+  // Make sure both endpoints are in the viewport before measuring; otherwise
+  // boundingBox returns coordinates outside the viewport and the synthetic
+  // pointer events go nowhere.
+  await source.scrollIntoViewIfNeeded();
+  await target.scrollIntoViewIfNeeded();
+
+  const viewport = page.viewportSize();
+  const viewportH = viewport?.height ?? 720;
+
   const sourceBox = await source.boundingBox();
   const targetBox = await target.boundingBox();
   if (!sourceBox || !targetBox) {
     throw new Error("Drag source or target has no bounding box");
   }
+
+  const clampY = (box: { y: number; height: number }) => {
+    const bottom = Math.min(box.y + box.height, viewportH - 4);
+    const top = Math.max(box.y, 4);
+    return (top + bottom) / 2;
+  };
+
   const sx = sourceBox.x + sourceBox.width / 2;
-  const sy = sourceBox.y + sourceBox.height / 2;
+  const sy = clampY(sourceBox);
   const tx = targetBox.x + targetBox.width / 2;
-  const ty = targetBox.y + targetBox.height / 2;
+  const ty = clampY(targetBox);
 
   await page.mouse.move(sx, sy);
   await page.mouse.down();
-  // Nudge past the activation distance, then traverse to the target.
+  // Nudge past dnd-kit's 6px activation distance, then traverse to the target.
   await page.mouse.move(sx + 8, sy + 8, { steps: 1 });
   await page.mouse.move(tx, ty, { steps: 8 });
   await page.waitForTimeout(50);

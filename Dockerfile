@@ -12,7 +12,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/pyproject.toml backend/pyproject.toml
-RUN pip install --no-cache-dir fastapi uvicorn[standard] python-dotenv httpx
+RUN pip install --no-cache-dir fastapi uvicorn[standard] python-dotenv httpx bcrypt pydantic
 
 COPY backend/ backend/
 COPY --from=frontend-builder /app/frontend/out /app/frontend/out

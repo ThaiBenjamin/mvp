@@ -2,17 +2,10 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { BoardData } from "@/lib/kanban";
-
-type ChatMessage = { role: "user" | "assistant"; content: string };
+import { api, type ChatMessage } from "@/lib/api";
 
 type AiChatProps = {
   onBoardUpdated: (nextBoard: BoardData) => void;
-};
-
-type ChatResponse = {
-  message: string;
-  boardUpdated: boolean;
-  board: BoardData | null;
 };
 
 export const AiChat = ({ onBoardUpdated }: AiChatProps) => {
@@ -23,17 +16,12 @@ export const AiChat = ({ onBoardUpdated }: AiChatProps) => {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const loadHistory = async () => {
-      try {
-        const response = await fetch("/api/chat/history");
-        if (!response.ok) return;
-        const data = (await response.json()) as { messages: ChatMessage[] };
-        setMessages(data.messages || []);
-      } catch {
-        // ignore — empty history is fine
-      }
-    };
-    loadHistory();
+    api
+      .getChatHistory()
+      .then((data) => setMessages(data.messages || []))
+      .catch(() => {
+        /* empty history is fine */
+      });
   }, []);
 
   useEffect(() => {
@@ -54,24 +42,13 @@ export const AiChat = ({ onBoardUpdated }: AiChatProps) => {
     setError(null);
 
     try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmed }),
-      });
-
-      if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(detail || "Chat request failed");
-      }
-
-      const data = (await response.json()) as ChatResponse;
+      const data = await api.sendChat(trimmed);
       setMessages((prev) => [...prev, { role: "assistant", content: data.message }]);
       if (data.boardUpdated && data.board) {
         onBoardUpdated(data.board);
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Chat request failed");
+    } catch {
+      setError("The assistant is unavailable right now. Please try again.");
     } finally {
       setSending(false);
     }
@@ -79,10 +56,11 @@ export const AiChat = ({ onBoardUpdated }: AiChatProps) => {
 
   const handleReset = async () => {
     try {
-      await fetch("/api/chat/reset", { method: "POST" });
-    } finally {
+      await api.resetChat();
       setMessages([]);
       setError(null);
+    } catch {
+      setError("Could not clear chat history. Please retry.");
     }
   };
 

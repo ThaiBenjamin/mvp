@@ -66,16 +66,10 @@ describe("KanbanBoard", () => {
                 ([id]) => id !== payload.card_id
               )
             ),
-            columns: currentBoard.columns.map((column) =>
-              column.id === payload.column_id
-                ? {
-                    ...column,
-                    cardIds: column.cardIds.filter(
-                      (id) => id !== payload.card_id
-                    ),
-                  }
-                : column
-            ),
+            columns: currentBoard.columns.map((column) => ({
+              ...column,
+              cardIds: column.cardIds.filter((id) => id !== payload.card_id),
+            })),
           };
         }
 

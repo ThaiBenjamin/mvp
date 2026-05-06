@@ -7,11 +7,6 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-  closestCorners,
-  getFirstCollision,
-  pointerWithin,
-  rectIntersection,
-  type CollisionDetection,
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
@@ -20,154 +15,39 @@ import {
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import { AiChat } from "@/components/AiChat";
-import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
-
-const findColumnId = (columns: BoardData["columns"], id: string) => {
-  if (columns.some((column) => column.id === id)) {
-    return id;
-  }
-
-  return columns.find((column) => column.cardIds.includes(id))?.id ?? null;
-};
-
-export const resolveDragOverColumnId = (
-  over: { id: UniqueIdentifier; data?: { current?: { columnId?: string } } } | null
-): string | null => {
-  if (!over) {
-    return null;
-  }
-
-  return over.data?.current?.columnId ?? String(over.id);
-};
-
-const isColumnId = (columns: BoardData["columns"], id: UniqueIdentifier) =>
-  columns.some((column) => column.id === id);
-
-// Multi-container kanban collision detection (adapted from the dnd-kit
-// MultipleContainers example). Pointer-first so empty columns win when the
-// cursor is over them, then drill down to the nearest card inside the column
-// so within-column reordering still works.
-export const buildCollisionDetection = (
-  columns: BoardData["columns"],
-  lastOverIdRef: { current: UniqueIdentifier | null }
-): CollisionDetection => (args) => {
-  const filtered = {
-    ...args,
-    droppableContainers: args.droppableContainers.filter(
-      (container) => container.id !== args.active?.id
-    ),
-  };
-
-  const pointerCollisions = pointerWithin(filtered);
-  const intersections =
-    pointerCollisions.length > 0 ? pointerCollisions : rectIntersection(filtered);
-  let overId = getFirstCollision(intersections, "id");
-
-  if (overId == null) {
-    overId = getFirstCollision(closestCorners(filtered), "id") ?? null;
-  }
-
-  if (overId != null && isColumnId(columns, overId)) {
-    const column = columns.find((c) => c.id === overId);
-    if (column && column.cardIds.length > 0) {
-      const cardSet = new Set<UniqueIdentifier>(column.cardIds);
-      const inner = closestCorners({
-        ...filtered,
-        droppableContainers: filtered.droppableContainers.filter(
-          (container) => container.id !== overId && cardSet.has(container.id)
-        ),
-      });
-      const innerId = getFirstCollision(inner, "id");
-      if (innerId != null) overId = innerId;
-    }
-  }
-
-  if (overId == null) {
-    return lastOverIdRef.current ? [{ id: lastOverIdRef.current }] : [];
-  }
-
-  lastOverIdRef.current = overId;
-  return [{ id: overId }];
-};
-
-export const getTargetDetails = (
-  columns: BoardData["columns"],
-  overId: string
-): { columnId: string; index: number } | null => {
-  const columnId = findColumnId(columns, overId);
-  if (!columnId) {
-    return null;
-  }
-
-  const targetColumn = columns.find((column) => column.id === columnId);
-  if (!targetColumn) {
-    return null;
-  }
-
-  const overIsColumn = targetColumn.id === overId;
-  if (overIsColumn) {
-    return { columnId, index: targetColumn.cardIds.length };
-  }
-
-  const targetIndex = targetColumn.cardIds.indexOf(overId);
-  return {
-    columnId,
-    index: targetIndex === -1 ? targetColumn.cardIds.length : targetIndex,
-  };
-};
+import { createId, moveCard, type BoardData } from "@/lib/kanban";
+import { buildCollisionDetection, findColumnId } from "@/lib/dnd";
+import { api, type BoardAction } from "@/lib/api";
 
 export const KanbanBoard = () => {
-  const [board, setBoard] = useState<BoardData>(() => initialData);
+  const [board, setBoard] = useState<BoardData | null>(null);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
-  const [loadingBoard, setLoadingBoard] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const dragSourceColumnRef = useRef<string | null>(null);
   const lastOverIdRef = useRef<UniqueIdentifier | null>(null);
-  const boardRef = useRef<BoardData>(board);
+  const boardRef = useRef<BoardData | null>(null);
   boardRef.current = board;
 
+  const reloadBoard = async () => {
+    try {
+      const data = await api.getBoard();
+      setBoard(data);
+      setLoadError(null);
+    } catch {
+      setLoadError("Unable to load board from server. Please retry.");
+    }
+  };
+
   useEffect(() => {
-    const loadBoard = async () => {
-      try {
-        const response = await fetch("/api/board");
-        if (!response.ok) {
-          setLoadError("Unable to load board from server. Using local board state.");
-          return;
-        }
-
-        const data = (await response.json()) as BoardData;
-        setBoard(data);
-      } catch {
-        setLoadError("Unable to load board from server. Using local board state.");
-      } finally {
-        setLoadingBoard(false);
-      }
-    };
-
-    loadBoard();
+    reloadBoard();
   }, []);
 
-  const sendBoardAction = async (
-    action: string,
-    payload: Record<string, unknown>,
-    optimisticBoard: BoardData
-  ) => {
+  const sendBoardAction = async (action: BoardAction, optimisticBoard: BoardData) => {
     setBoard(optimisticBoard);
     setSaveError(null);
-
     try {
-      const response = await fetch("/api/board/actions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, payload }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Save failed");
-      }
-
-      const updatedBoard = (await response.json()) as BoardData;
+      const updatedBoard = await api.postBoardAction(action);
       setBoard(updatedBoard);
     } catch {
       setSaveError("Unable to save board changes. Refresh to retry.");
@@ -180,14 +60,16 @@ export const KanbanBoard = () => {
     })
   );
 
-  const cardsById = useMemo(() => board.cards, [board.cards]);
+  const cardsById = useMemo(() => board?.cards ?? {}, [board]);
+  const columns = board?.columns ?? [];
 
   const collisionDetection = useMemo(
-    () => buildCollisionDetection(board.columns, lastOverIdRef),
-    [board.columns]
+    () => buildCollisionDetection(columns, lastOverIdRef),
+    [columns]
   );
 
   const handleDragStart = (event: DragStartEvent) => {
+    if (!board) return;
     const activeId = event.active.id as string;
     setActiveCardId(activeId);
     dragSourceColumnRef.current = findColumnId(board.columns, activeId);
@@ -203,6 +85,7 @@ export const KanbanBoard = () => {
     if (activeId === overId) return;
 
     setBoard((prev) => {
+      if (!prev) return prev;
       const activeColumn = findColumnId(prev.columns, activeId);
       const overColumn = findColumnId(prev.columns, overId);
       if (!activeColumn || !overColumn || activeColumn === overColumn) return prev;
@@ -219,8 +102,19 @@ export const KanbanBoard = () => {
             const idx = toCol.cardIds.indexOf(overId);
             return idx === -1 ? toCol.cardIds.length : idx;
           })();
+
       const updatedTo = [...toCol.cardIds];
       updatedTo.splice(insertAt, 0, activeId);
+
+      // No-op short-circuit: if the active card is already at insertAt in the
+      // target column and removed from the source, return prev to avoid an
+      // unnecessary re-render.
+      if (
+        toCol.cardIds[insertAt] === activeId &&
+        !fromCol.cardIds.includes(activeId)
+      ) {
+        return prev;
+      }
 
       return {
         ...prev,
@@ -242,11 +136,11 @@ export const KanbanBoard = () => {
     lastOverIdRef.current = null;
 
     if (!over) return;
-
     const currentBoard = boardRef.current;
+    if (!currentBoard) return;
+
     const finalColumnId = findColumnId(currentBoard.columns, activeId);
     if (!finalColumnId) return;
-
     const finalColumn = currentBoard.columns.find((c) => c.id === finalColumnId);
     if (!finalColumn) return;
     const finalIndex = finalColumn.cardIds.indexOf(activeId);
@@ -261,11 +155,13 @@ export const KanbanBoard = () => {
         if (reorderedIndex === finalIndex) return;
         const nextBoard = { ...currentBoard, columns: nextColumns };
         sendBoardAction(
-          "move_card",
           {
-            card_id: activeId,
-            target_column_id: finalColumnId,
-            target_index: reorderedIndex,
+            action: "move_card",
+            payload: {
+              card_id: activeId,
+              target_column_id: finalColumnId,
+              target_index: reorderedIndex,
+            },
           },
           nextBoard
         );
@@ -274,28 +170,34 @@ export const KanbanBoard = () => {
     }
 
     sendBoardAction(
-      "move_card",
       {
-        card_id: activeId,
-        target_column_id: finalColumnId,
-        target_index: finalIndex,
+        action: "move_card",
+        payload: {
+          card_id: activeId,
+          target_column_id: finalColumnId,
+          target_index: finalIndex,
+        },
       },
       currentBoard
     );
   };
 
   const handleRenameColumn = (columnId: string, title: string) => {
+    if (!board) return;
     const nextBoard = {
       ...board,
       columns: board.columns.map((column) =>
         column.id === columnId ? { ...column, title } : column
       ),
     };
-
-    sendBoardAction("rename_column", { column_id: columnId, title }, nextBoard);
+    sendBoardAction(
+      { action: "rename_column", payload: { column_id: columnId, title } },
+      nextBoard
+    );
   };
 
   const handleAddCard = (columnId: string, title: string, details: string) => {
+    if (!board) return;
     const id = createId("card");
     const nextBoard = {
       ...board,
@@ -309,20 +211,22 @@ export const KanbanBoard = () => {
           : column
       ),
     };
-
     sendBoardAction(
-      "add_card",
       {
-        column_id: columnId,
-        title,
-        details: details || "No details yet.",
-        card_id: id,
+        action: "add_card",
+        payload: {
+          column_id: columnId,
+          title,
+          details: details || "No details yet.",
+          card_id: id,
+        },
       },
       nextBoard
     );
   };
 
   const handleDeleteCard = (columnId: string, cardId: string) => {
+    if (!board) return;
     const nextBoard = {
       ...board,
       cards: Object.fromEntries(
@@ -334,36 +238,39 @@ export const KanbanBoard = () => {
           : column
       ),
     };
-
     sendBoardAction(
-      "delete_card",
-      { column_id: columnId, card_id: cardId },
+      { action: "delete_card", payload: { card_id: cardId } },
       nextBoard
     );
   };
 
   const activeCard = activeCardId ? cardsById[activeCardId] : null;
 
-  if (loadingBoard) {
-    return (
-      <p className="text-sm text-[var(--gray-text)]">Loading your board...</p>
-    );
+  if (!board) {
+    if (loadError) {
+      return (
+        <div className="flex flex-col gap-4">
+          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {loadError}
+          </div>
+          <button
+            type="button"
+            onClick={reloadBoard}
+            className="self-start rounded-full bg-[var(--primary-blue)] px-4 py-2 text-sm font-semibold text-white"
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+    return <p className="text-sm text-[var(--gray-text)]">Loading your board...</p>;
   }
 
   return (
     <div className="flex flex-col gap-6">
-      {(loadError || saveError) && (
-        <div className="grid gap-3">
-          {loadError && (
-            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {loadError}
-            </div>
-          )}
-          {saveError && (
-            <div className="rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-700">
-              {saveError}
-            </div>
-          )}
+      {saveError && (
+        <div className="rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-700">
+          {saveError}
         </div>
       )}
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start">

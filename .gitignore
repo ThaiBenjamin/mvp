@@ -174,3 +174,14 @@ cython_debug/
 
 .DS_Store
 
+# Project-local
+*.db
+*.db-journal
+.claude/
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/test-results/
+frontend/playwright-report/
+
+
