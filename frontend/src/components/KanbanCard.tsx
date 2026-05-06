@@ -72,7 +72,7 @@ export const KanbanCard = ({ card, onDelete, onEdit }: KanbanCardProps) => {
           )}
         </div>
       </div>
-      <div className="absolute right-2 top-2 flex flex-col gap-1 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
+      <div className="absolute right-2 top-2 flex flex-col gap-1 opacity-60 transition group-hover:opacity-100 focus-within:opacity-100">
         <button
           type="button"
           onPointerDown={(event) => event.stopPropagation()}
@@ -80,7 +80,7 @@ export const KanbanCard = ({ card, onDelete, onEdit }: KanbanCardProps) => {
             event.stopPropagation();
             onEdit(card);
           }}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[var(--gray-text)] hover:bg-[var(--surface)] hover:text-[var(--primary-blue)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-blue)]"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/80 text-[var(--gray-text)] shadow-sm hover:bg-[var(--surface)] hover:text-[var(--primary-blue)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-blue)]"
           aria-label={`Edit ${card.title}`}
         >
           <PencilIcon className="h-3.5 w-3.5" />
@@ -92,7 +92,7 @@ export const KanbanCard = ({ card, onDelete, onEdit }: KanbanCardProps) => {
             event.stopPropagation();
             onDelete(card.id);
           }}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[var(--gray-text)] hover:bg-red-50 hover:text-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-blue)]"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/80 text-[var(--gray-text)] shadow-sm hover:bg-red-50 hover:text-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-blue)]"
           aria-label={`Delete ${card.title}`}
         >
           <TrashIcon className="h-4 w-4" />

@@ -54,6 +54,18 @@ def test_parse_non_string_message_raises_502():
     assert exc.value.status_code == 502
 
 
+def test_parse_allows_unescaped_control_characters_in_strings():
+    # The free model occasionally emits literal newlines inside JSON strings.
+    out = parse_ai_response('{"message": "line one\nline two", "boardUpdate": null}')
+    assert out["message"] == "line one\nline two"
+
+
+def test_parse_extracts_json_from_surrounding_prose():
+    raw = 'Sure thing! Here is the update:\n{"message": "ok", "boardUpdate": null}\nLet me know.'
+    out = parse_ai_response(raw)
+    assert out["message"] == "ok"
+
+
 # -------- apply_ai_board_update
 
 def test_apply_ai_no_update_returns_unchanged(board):

@@ -65,10 +65,43 @@ async def call_openrouter(messages: list[dict]) -> str:
         raise HTTPException(status_code=502, detail="AI service returned an error")
 
     try:
-        return response.json()["choices"][0]["message"]["content"]
+        content = response.json()["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError, ValueError) as exc:
-        logger.exception("Could not parse OpenRouter response: %s", exc)
+        logger.error("Unexpected OpenRouter response shape (%s): %s", exc, response.text[:500])
         raise HTTPException(status_code=502, detail="AI service returned an error")
+    if not isinstance(content, str) or not content.strip():
+        logger.error("OpenRouter returned empty/non-string content: %s", response.text[:500])
+        raise HTTPException(status_code=502, detail="AI service returned an empty response")
+    return content
+
+
+def _extract_json_object(text: str) -> str | None:
+    """Find the first balanced top-level {...} block in text, ignoring braces inside strings."""
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
 
 
 def parse_ai_response(raw: str) -> dict:
@@ -77,10 +110,21 @@ def parse_ai_response(raw: str) -> dict:
         text = text.strip("`")
         if text.lower().startswith("json"):
             text = text[4:].lstrip()
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError as exc:
-        logger.warning("AI returned non-JSON response: %s", exc)
+
+    # The free model occasionally emits literal newlines/tabs inside JSON
+    # strings (invalid by spec). strict=False lets us accept them.
+    parsed = None
+    for candidate in (text, _extract_json_object(text)):
+        if not candidate:
+            continue
+        try:
+            parsed = json.loads(candidate, strict=False)
+            break
+        except json.JSONDecodeError:
+            continue
+
+    if parsed is None:
+        logger.warning("AI returned non-JSON response: %r", raw[:300])
         raise HTTPException(status_code=502, detail="AI service returned an invalid response")
 
     if not isinstance(parsed, dict) or not isinstance(parsed.get("message"), str):
