@@ -75,35 +75,6 @@ async def call_openrouter(messages: list[dict]) -> str:
     return content
 
 
-def _extract_json_object(text: str) -> str | None:
-    """Find the first balanced top-level {...} block in text, ignoring braces inside strings."""
-    start = text.find("{")
-    if start == -1:
-        return None
-    depth = 0
-    in_string = False
-    escape = False
-    for i in range(start, len(text)):
-        ch = text[i]
-        if in_string:
-            if escape:
-                escape = False
-            elif ch == "\\":
-                escape = True
-            elif ch == '"':
-                in_string = False
-            continue
-        if ch == '"':
-            in_string = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-    return None
-
-
 def parse_ai_response(raw: str) -> dict:
     text = raw.strip()
     if text.startswith("```"):
@@ -111,17 +82,16 @@ def parse_ai_response(raw: str) -> dict:
         if text.lower().startswith("json"):
             text = text[4:].lstrip()
 
-    # The free model occasionally emits literal newlines/tabs inside JSON
-    # strings (invalid by spec). strict=False lets us accept them.
+    # strict=False tolerates literal newlines/tabs inside JSON strings, which the
+    # free model occasionally emits. raw_decode parses the first JSON value and
+    # ignores trailing prose, so we just need to skip past any leading prose.
+    start = text.find("{")
     parsed = None
-    for candidate in (text, _extract_json_object(text)):
-        if not candidate:
-            continue
+    if start != -1:
         try:
-            parsed = json.loads(candidate, strict=False)
-            break
+            parsed, _ = json.JSONDecoder(strict=False).raw_decode(text[start:])
         except json.JSONDecodeError:
-            continue
+            pass
 
     if parsed is None:
         logger.warning("AI returned non-JSON response: %r", raw[:300])
@@ -150,12 +120,12 @@ def apply_ai_board_update(board: dict, board_update: dict | None) -> tuple[dict,
         return board, False
 
     changed = False
+    valid_column_ids = {c["id"] for c in board["columns"]}
 
     for action in actions:
         if not isinstance(action, dict):
             continue
         action_type = action.get("type")
-        valid_column_ids = {c["id"] for c in board["columns"]}
         try:
             if action_type == "rename_column":
                 column_id = action.get("column_id")
@@ -221,11 +191,13 @@ def apply_ai_board_update(board: dict, board_update: dict | None) -> tuple[dict,
                 title = action.get("title")
                 if _is_str(title):
                     board = apply_board_action(board, "add_column", {"title": title.strip()})
+                    valid_column_ids = {c["id"] for c in board["columns"]}
                     changed = True
             elif action_type == "delete_column":
                 column_id = action.get("column_id")
                 if column_id in valid_column_ids:
                     board = apply_board_action(board, "delete_column", {"column_id": column_id})
+                    valid_column_ids = {c["id"] for c in board["columns"]}
                     changed = True
         except HTTPException as exc:
             logger.warning("AI action %r rejected: %s", action_type, exc.detail)

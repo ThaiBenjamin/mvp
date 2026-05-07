@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { addCard, signIn } from "./helpers";
 
 // dnd-kit's PointerSensor has a 6px activation distance and updates `over`
 // only on pointermove. Playwright's `Locator.dragTo` performs a single-step
@@ -41,22 +42,6 @@ const dragCardTo = async (page: Page, source: Locator, target: Locator) => {
   await page.mouse.up();
 };
 
-const signIn = async (page: import("@playwright/test").Page) => {
-  await page.goto("/");
-  const loginTitle = page.getByRole("heading", { name: /Project Management/ });
-  const boardTitle = page.getByRole("heading", { name: "Kanban Studio" }).first();
-
-  // Wait for the auth state to settle: either the login form or the board appears.
-  await expect(loginTitle.or(boardTitle)).toBeVisible();
-
-  if (await loginTitle.isVisible()) {
-    await page.getByPlaceholder("user").fill("user");
-    await page.getByPlaceholder("password").fill("password");
-    await page.getByRole("button", { name: /sign in/i }).click();
-    await expect(boardTitle).toBeVisible();
-  }
-};
-
 test("loads the kanban board", async ({ page }) => {
   await signIn(page);
   await expect(page.getByRole("heading", { name: "Kanban Studio" }).first()).toBeVisible();
@@ -66,10 +51,7 @@ test("loads the kanban board", async ({ page }) => {
 test("adds a card to a column", async ({ page }) => {
   await signIn(page);
   const firstColumn = page.locator('[data-testid^="column-"]').first();
-  await firstColumn.getByRole("button", { name: /add a card/i }).click();
-  await firstColumn.getByPlaceholder("Card title").fill("Playwright card");
-  await firstColumn.getByPlaceholder("Details").fill("Added via e2e.");
-  await firstColumn.getByRole("button", { name: /add card/i }).click();
+  await addCard(firstColumn, "Playwright card", "Added via e2e.");
   await expect(firstColumn.getByText("Playwright card")).toBeVisible();
 });
 
@@ -91,10 +73,7 @@ test("persists board changes across logout and login", async ({ page }) => {
   const cardTitle = `Persistence card ${Date.now()}`;
 
   const firstColumn = page.locator('[data-testid^="column-"]').first();
-  await firstColumn.getByRole("button", { name: /add a card/i }).click();
-  await firstColumn.getByPlaceholder("Card title").fill(cardTitle);
-  await firstColumn.getByPlaceholder("Details").fill("Saved across sessions.");
-  await firstColumn.getByRole("button", { name: /add card/i }).click();
+  await addCard(firstColumn, cardTitle, "Saved across sessions.");
 
   await expect(firstColumn.getByText(cardTitle)).toBeVisible();
   await page.getByRole("button", { name: /log out/i }).click();

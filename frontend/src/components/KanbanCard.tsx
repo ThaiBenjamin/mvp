@@ -16,6 +16,9 @@ type KanbanCardProps = {
   onEdit: (card: Card) => void;
 };
 
+const iconBtnBase =
+  "inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/80 text-[var(--gray-text)] shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-blue)]";
+
 export const KanbanCard = ({ card, onDelete, onEdit }: KanbanCardProps) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: card.id });
@@ -80,7 +83,7 @@ export const KanbanCard = ({ card, onDelete, onEdit }: KanbanCardProps) => {
             event.stopPropagation();
             onEdit(card);
           }}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/80 text-[var(--gray-text)] shadow-sm hover:bg-[var(--surface)] hover:text-[var(--primary-blue)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-blue)]"
+          className={clsx(iconBtnBase, "hover:bg-[var(--surface)] hover:text-[var(--primary-blue)]")}
           aria-label={`Edit ${card.title}`}
         >
           <PencilIcon className="h-3.5 w-3.5" />
@@ -92,7 +95,7 @@ export const KanbanCard = ({ card, onDelete, onEdit }: KanbanCardProps) => {
             event.stopPropagation();
             onDelete(card.id);
           }}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/80 text-[var(--gray-text)] shadow-sm hover:bg-red-50 hover:text-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-blue)]"
+          className={clsx(iconBtnBase, "hover:bg-red-50 hover:text-red-600")}
           aria-label={`Delete ${card.title}`}
         >
           <TrashIcon className="h-4 w-4" />
