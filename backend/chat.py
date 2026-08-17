@@ -106,9 +106,15 @@ async def chat(req: ChatRequest, user_id: Annotated[int, Depends(require_user)])
     board_state = load_board_state(board_id=board_id, user_id=user_id)
     history = load_chat_history(user_id, board_id)[-config.CHAT_HISTORY_LIMIT:]
 
+    # The board state must ride inside the single system message. Sent as a
+    # second system message it is dropped by the provider roughly two thirds of
+    # the time, and the model then answers with no board data at all -- it
+    # invents contents, or asks the user for ids that were already supplied.
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "system", "content": f"Current board state JSON:\n{json.dumps(board_state)}"},
+        {
+            "role": "system",
+            "content": f"{SYSTEM_PROMPT}\n\nCurrent board state JSON:\n{json.dumps(board_state)}",
+        },
         *history,
         {"role": "user", "content": user_message},
     ]
