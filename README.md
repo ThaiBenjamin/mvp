@@ -1,99 +1,103 @@
-# 🗂️ Project Management MVP
+# Project Management MVP
 
-A full-stack Kanban-style project management web app with an AI chat assistant that can create, move, and delete cards on your behalf.
+A Kanban board with an AI sidebar that moves the cards itself, through the same validated
+code path the buttons use.
 
-![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
-![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
-![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688?logo=fastapi&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?logo=docker&logoColor=white)
-![SQLite](https://img.shields.io/badge/SQLite-Database-003B57?logo=sqlite&logoColor=white)
+## The idea
 
----
+Kanban is a good interface for reading work and a tedious one for changing it. Clearing a
+column means deleting cards one at a time. Moving a batch to the next stage means dragging
+each one. Renaming a card means finding it, opening it, editing it, saving it. None of it is
+hard, and all of it is clicking.
 
-## ✨ Features
+So the premise was to give the board a second interface: say "move everything in review to
+done" and have it happen. That's a different problem from a chat sidebar that summarizes
+your board, because the model's output stops being text somebody reads and starts being an
+instruction something executes. The interesting engineering isn't getting the model to
+answer. It's deciding what happens when the answer is wrong.
 
-- **Kanban Board** — Drag-and-drop cards across customizable columns using `@dnd-kit`
-- **Multiple Boards** — Create and switch between separate project boards
-- **AI Chat Sidebar** — Chat with an LLM (via OpenRouter) that can add, move, rename, and delete cards on your behalf
-- **User Authentication** — Secure session-based login with bcrypt password hashing
-- **Fully Tested** — Unit tests (Vitest), end-to-end tests (Playwright), and backend tests (pytest)
-- **Docker Deployment** — Single-container deployment via multi-stage Docker build
+## How that stays safe
 
----
+`apply_board_action` is a pure function — board in, new board out, never mutating its input.
+The REST endpoint behind the buttons calls it. The AI path calls it too, once per action the
+model proposed, after each one has been checked against the ids that actually exist. Nothing
+about the reducer knows which caller it has.
 
-## 🛠️ Tech Stack
+That's what makes the assistant safe to wire up directly. It isn't trusted, it's funnelled.
+The model's job ends at proposing a list of actions; whether any of them is legal is decided
+by code that was already there for the buttons.
 
-| Layer | Technology |
+Validation is per action, not per batch. A move needs a card id that exists and a target
+column that exists. A rename needs a real column and a non-empty title. A delete needs a
+card actually on the board. Anything that fails is skipped rather than corrected or guessed
+at, and the loop keeps going, so one hallucinated id can't cost you the other nine edits.
+
+The parser is deliberately forgiving too. The request asks for a JSON object, but a cheap
+model doesn't always comply, so the parser strips code fences, skips leading prose to the
+first brace, and decodes non-strictly so literal newlines inside strings don't kill the
+turn. If what comes back still has no message, the turn fails loudly rather than
+half-applying.
+
+## What's in it
+
+Drag-and-drop cards across customizable columns with `@dnd-kit`, multiple boards per
+account, session-based login with bcrypt hashing, and the AI sidebar. Tests run at three
+levels: Vitest on the frontend, Playwright end to end, pytest on the backend.
+
+## Stack
+
+| Layer | What |
 |---|---|
 | Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS |
-| Drag & Drop | `@dnd-kit/core`, `@dnd-kit/sortable` |
+| Drag and drop | `@dnd-kit/core`, `@dnd-kit/sortable` |
 | Backend | Python 3.12, FastAPI, Uvicorn |
-| Database | SQLite (auto-created on first run) |
-| Auth | Session cookies + bcrypt |
-| AI | OpenRouter API (configurable model) |
+| Database | SQLite, created on first run |
+| Auth | Session cookies and bcrypt |
+| AI | OpenRouter, configurable model |
 | Testing | Vitest, Playwright, pytest |
 | Deployment | Docker, docker-compose |
 
----
+The frontend is a static Next.js export served by the same FastAPI process that owns the
+API, so the whole app is one container on one port. I kept the architecture deliberately
+small — one SQLite file, one JSON blob per board — so the work went into finishing features
+rather than provisioning infrastructure.
 
-## 🚀 Setup & Running
+## Running it
 
-### Prerequisites
-- Docker & Docker Compose, **or** Node.js 20+ and Python 3.12+ with `uv`
+You'll need Docker and Docker Compose, or Node 20+ and Python 3.12+ with `uv`.
 
-### Option A — Docker (recommended)
+### With Docker
 
 ```bash
 git clone https://github.com/ThaiBenjamin/mvp.git
 cd mvp
 
-# Create .env with your OpenRouter key
 echo "OPENROUTER_API_KEY=your_key_here" > .env
 
-# Start (Windows)
-scripts/start.ps1
-
-# Start (Linux/Mac)
-./scripts/start.sh
+scripts/start.ps1    # Windows
+./scripts/start.sh   # Linux / macOS
 ```
 
-The app runs at **http://localhost:8000**. Default credentials: `user` / `password`.
+The app runs at http://localhost:8000. Default credentials are `user` / `password`.
 
-### Option B — Local development
+### Without Docker
 
 ```bash
-# Backend
 cd backend
 uv sync
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
-
-# Frontend (separate terminal)
-cd frontend
-npm install
-npm run dev   # runs at http://localhost:3000
 ```
-
-### Running Tests
 
 ```bash
-# Frontend unit tests
-cd frontend && npm run test:unit
-
-# Frontend e2e tests (requires running server)
-cd frontend && npm run test:e2e
-
-# Backend tests
-cd backend && pytest
+cd frontend
+npm install
+npm run dev   # http://localhost:3000
 ```
 
----
+### Tests
 
-## 🧠 What I Built and Why
-
-I built this as a full-stack portfolio project to practice shipping a production-quality web app from scratch — not just a tutorial clone, but something with real architecture decisions.
-
-The goal was to integrate every layer of a modern stack: a statically-exported Next.js frontend, a FastAPI Python backend, SQLite persistence, Docker containerization, and an AI chat interface that actually modifies state. The AI sidebar was the most interesting part — instead of just answering questions, it understands board context and issues structured actions (`add_card`, `move_card`, `delete_card`) that the backend processes.
-
-I deliberately kept the architecture simple: one SQLite file, one Docker container, one JSON blob per board. The constraint forced me to focus on feature completeness and code quality rather than over-engineering infrastructure.
+```bash
+cd frontend && npm run test:unit
+cd frontend && npm run test:e2e   # needs a running server
+cd backend && pytest
+```
